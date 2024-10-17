@@ -5,28 +5,6 @@ Welcome to the GPT3 repository! This project is an attempt to recreate the archi
 ### Note: I'm currently working on training these models, now 17M in on it's way. When finished, all weights will be published on huggingface
 
 ## Repository Structure
-
-```
-gpt3_stable_1m.py
-
-
-
-
-gpt3_stable_with_cross_val.py
-
-
-
-
-gpt3-inference_v2.py
-
-
-
-
-gpt3-test7-SFT.py
-
-
-```
-
 ### Files
 
 - **[gpt3_stable_17m.py](gpt3_stable_17m.py)**: Script for training the GPT-3 model which has approximateley 17,867,008 parameters.
