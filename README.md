@@ -2,8 +2,6 @@
 
 Welcome to the GPT3 repository! This project is an attempt to recreate the architecture and approach from the original OpenAI GPT-3 paper. The repository includes scripts for training, fine-tuning, and inference of a GPT-3-like model using PyTorch and the Hugging Face Transformers library.
 
-### Note: I'm currently working on training these models, now 17M in on it's way. When finished, all weights will be published on huggingface
-
 ## Repository Structure
 ### Files
 
@@ -49,7 +47,6 @@ To train the model, run the following command:
 ```sh
 python gpt3-17m.py
 
-
 # on MacOS or Linux it's 
 python3 gpt3-17m.py
 
@@ -61,7 +58,6 @@ To generate text using the trained model, run:
 
 ```sh
 python inference.py
-
 
 # on MacOS or Linux
 python3 gpt3-inference_v2.py
@@ -86,6 +82,10 @@ The training script initializes the model, optimizer, and learning rate schedule
 ### Inference Script
 
 The inference script loads a pre-trained model and tokenizer, moves the model to the appropriate device, and generates text based on user input using the [`generate_text_stream`](inference.py#L246) function.
+
+You can also download weights from [HuggingFace](k050506koch/GPT3-dev)(this is 17M params early checkpoint, more soon).
+
+To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310)
 
 ## Custom Components
 
