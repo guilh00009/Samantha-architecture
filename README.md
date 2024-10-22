@@ -83,7 +83,7 @@ The training script initializes the model, optimizer, and learning rate schedule
 
 The inference script loads a pre-trained model and tokenizer, moves the model to the appropriate device, and generates text based on user input using the [`generate_text_stream`](inference.py#L246) function.
 
-You can also download weights from [HuggingFace](k050506koch/GPT3-dev)(this is 17M params early checkpoint, more soon).
+You can also download weights from [HuggingFace](https://huggingface.co/k050506koch/GPT3-dev) (this is 17M params early checkpoint, more soon).
 
 To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310)
 
