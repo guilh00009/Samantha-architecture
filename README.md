@@ -3,16 +3,15 @@
 Welcome to the GPT3 repository! This project is an attempt to recreate the architecture and approach from the original OpenAI GPT-3 paper. The repository includes scripts for training, fine-tuning, and inference of a GPT-3-like model using PyTorch and the Hugging Face Transformers library.
 
 ## Repository Structure
-### Files
 
-- **[gpt3_stable_17m.py](gpt3_stable_17m.py)**: Script for training the GPT-3 model which has approximateley 17,867,008 parameters.
-- **[gpt3.py](gpt3.py)**: Script for training the GPT-3 model with cross-validation.
+- **[train-17m.py](train-17m.py)**: Script for training the GPT-3 model which has 17M (17,867,008) parameters.
+- **[train_125m.py](train_125m.py)**: Script for training the GPT-3 model with cross-validation.
 - **[inference.py](inference.py)**: Script for running inference with the trained GPT-3 model.
-- **[gpt3-SFT.py](gpt3-SFT.py)**: Script for testing and fine-tuning the GPT-3 model with Supervised Fine-Tuning (SFT).
+- **[fine-tune-SFT.py](fine-tune-SFT.py)**: Script for testing and fine-tuning the GPT-3 model with Supervised Fine-Tuning (SFT).
 
 ## Key Features
 
-- **Custom Model Architecture**: Implements custom GPT-3 model components such as [`CustomGPT2Attention`](gpt3-17m.py#L136), [`CustomGPT2MLP`](gpt3-17m.py#L143), [`CustomGPT2Block`](gpt3-17m.py#L150), and [`CustomGPT2LMHeadModel`](gpt3-17m.py#L235).
+- **Custom Model Architecture**: Implements custom GPT-3 model components such as [`CustomGPT2Attention`](train-17m.py#L136), [`CustomGPT2MLP`](train-17m.py#L143), [`CustomGPT2Block`](train-17m.py#L150), and [`CustomGPT2LMHeadModel`](train-17m.py#L235).
 - **Training Loop**: Includes gradient accumulation, gradient clipping, and perplexity computation.
 - **Inference**: Supports text generation stream with top-k and top-p filtering.
 - **Logging and Checkpointing**: Uses Weights & Biases for logging and saves model checkpoints periodically.
@@ -37,7 +36,7 @@ Welcome to the GPT3 repository! This project is an attempt to recreate the archi
 
 2. Install the required packages:
     ```sh
-    pip install -U transformers datasetes evaluate torch wandb
+    pip install -U transformers datasets evaluate torch wandb
     ```
 
 ### Training
@@ -45,12 +44,12 @@ Welcome to the GPT3 repository! This project is an attempt to recreate the archi
 To train the model, run the following command:
 
 ```sh
-python gpt3-17m.py
+python train-17m.py
 
 # on MacOS or Linux it's 
-python3 gpt3-17m.py
-
+python3 train-17m.py
 ```
+### Note: training is very memory-consuming task, if you don't have that much VRAM, you can "trade" compute to memory by reducing batch size and increasing gradient accumulation steps
 
 ### Inference
 
@@ -60,17 +59,17 @@ To generate text using the trained model, run:
 python inference.py
 
 # on MacOS or Linux
-python3 gpt3-inference_v2.py
+python3 inference.py
 ```
 
 ### Fine-Tuning
 
-If you have trained a foundation model 
+If you have trained a foundation model, then you may want to Supervised Fine-Tune it for chat or any other purpose.
 ```sh
-python gpt3-SFT.py
+python fine-tune-SFT.py
 
 # on MacOS or Linux
-python3 gpt3-SFT.py
+python3 fine-tune-SFT.py
 ```
 
 ## Usage
@@ -83,29 +82,27 @@ The training script initializes the model, optimizer, and learning rate schedule
 
 The inference script loads a pre-trained model and tokenizer, moves the model to the appropriate device, and generates text based on user input using the [`generate_text_stream`](inference.py#L246) function.
 
-You can also download weights from [HuggingFace](https://huggingface.co/k050506koch/GPT3-dev) (this is 17M params early checkpoint, more soon).
+You can also download weights from HuggingFace:
 
-To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310)
+17 million parameters: https://huggingface.co/k050506koch/GPT3-dev (architecture demonstrator)
+
+125 million parameters: https://huggingface.co/k050506koch/GPT3-dev-125m (more like an actual implementation)
+
+To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310). This will work for both HuggingFace-based models of **same architecture** and locally-based ones. To download a remote-hosted model, type "k050506koch/GPT3-dev-125m" into [model_path = ""](inference.py#L310).
+
+#### Note: Both these models are highly undertrained due to my computational budget. Both models underwent 600,000 training steps with a batch size of 12 and a sequence length of 512, totaling approximately 3.7 billion tokens (512 * 12 * 600,000 = 3,686,400,000). (This is a very small amount for the model of this size. For example, OpenAI trained their GPT-3 model series on 300 Bn tokens.)
 
 ## Custom Components
 
-Everything was taken from official GPT-2 implementation 
+**All custom components are based on the official GPT-2 implementation and have been modified according to the GPT-3 paper.**
 
-### CustomGPT2Attention
+- CustomGPT2Attention: GPT-3 attention mechanism with biases.
 
-A custom implementation of the GPT-3 attention mechanism with biases included.
+- CustomGPT2MLP: GPT-3 MLP with biases and standard GeLU.
 
-### CustomGPT2MLP
+- CustomGPT2Block: GPT-3 block with pre-layer normalization (can be switched back to GPT-2's post-layer normalization).
 
-A custom implementation of the GPT-3 MLP with biases and standard GeLU activation.
-
-### CustomGPT2Block
-
-A custom implementation of the GPT-3 block with optional pre-layer normalization.
-
-### CustomGPT2LMHeadModel
-
-A custom implementation of the GPT-3 language model head with additional keyword arguments support.
+- CustomGPT2LMHeadModel: GPT-3 language model head with keyword arguments support.
 
 ## Contributing
 
