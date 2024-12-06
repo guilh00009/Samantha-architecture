@@ -14,47 +14,62 @@ from transformers import (
 from datasets import load_dataset, interleave_datasets
 import wandb
 from itertools import islice, cycle
+import time
+import argparse
+import sys
 
-wandb.init(project='gpt3-small-fineweb', name='fineweb-training-600,000_v5')
+start_time = time.time()
 
+torch.set_default_dtype = torch.bfloat16
+
+parser = argparse.ArgumentParser(description='Training script with resume functionality.')
+parser.add_argument('--resume', action='store_true', help='Resume training from the last checkpoint.')
+args = parser.parse_args()
+
+wandb.init(project='gpt3-small-fineweb', name='fineweb-training-600,000')
+
+# tokenizer
 tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 tokenizer.pad_token = tokenizer.eos_token
 
 global block_size
-block_size = 2048  # maximum sequence length
-
-# List of dataset names
-dataset_names = [
-    "CC-MAIN-2024-10",
-    "CC-MAIN-2024-18",
-    "CC-MAIN-2023-50",
-]
-
-def load_datasets(dataset_names, split, streaming=True):
-    datasets_list = []
-    for name in dataset_names:
-        dataset = load_dataset(
-            "HuggingFaceFW/fineweb",
-            name=name,
-            split=split,
-            streaming=streaming
-        )
-        datasets_list.append(dataset)
-    return datasets_list
+block_size = 512  # For testing purposes; set to 2048 for full training
 
 # Load datasets
-training_datasets = load_datasets(dataset_names, split="train", streaming=True)
-training_dataset = interleave_datasets(training_datasets)
+dataset1 = load_dataset(
+    "HuggingFaceFW/fineweb",
+    name="CC-MAIN-2024-10",
+    split="train",
+    streaming=True
+)
 
+dataset2 = load_dataset(
+    "HuggingFaceFW/fineweb",
+    name="CC-MAIN-2024-18",
+    split="train",
+    streaming=True
+)
+
+dataset3 = load_dataset(
+    "HuggingFaceFW/fineweb",
+    name="CC-MAIN-2023-50",
+    split="train",
+    streaming=True
+)
+
+# Combine the datasets
+dataset = interleave_datasets([dataset1, dataset2, dataset3])
+
+# Tokenize the dataset stream
 def tokenize_function(example):
     return tokenizer(example['text'], truncation=True, max_length=block_size)
 
-tokenized_train_dataset = training_dataset.map(
+tokenized_dataset = dataset.map(
     tokenize_function,
-    remove_columns=training_dataset.column_names,
+    remove_columns=dataset.column_names,
 )
 
-# Function to chunk data into batches
+# function to chunk data into batches
 def chunked_iterator(iterable, chunk_size):
     iterator = iter(iterable)
     for first in iterator:
@@ -71,17 +86,20 @@ def group_texts(examples):
     total_length = (total_length // block_size) * block_size
     result = {
         k: [concatenated[k][i : i + block_size] for i in range(0, total_length, block_size)]
-        for k in concatenated.keys()
+            for k in concatenated.keys()
     }
     result['labels'] = result['input_ids'].copy()
     return result
 
-# Create an iterable that yields grouped texts for training
-grouped_train_dataset = (
-    group_texts(batch) for batch in chunked_iterator(tokenized_train_dataset, chunk_size=1000)
+# Create an iterable that yields grouped texts
+grouped_dataset = (
+    group_texts(batch) for batch in chunked_iterator(tokenized_dataset, chunk_size=1000)
 )
 
-# Define a custom IterableDataset
+###########
+# Dataset #
+###########
+
 class StreamDataset(IterableDataset):
     def __init__(self, grouped_dataset):
         self.grouped_dataset = grouped_dataset
@@ -94,36 +112,35 @@ class StreamDataset(IterableDataset):
                     'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
                 }
 
-# training dataset
-train_dataset = StreamDataset(grouped_train_dataset)
-train_dataloader = DataLoader(train_dataset, batch_size=12) # batch size 12 as in the original GPT-3 paper, more calculations on batch size under
+train_dataset = StreamDataset(grouped_dataset)
+train_dataloader = DataLoader(train_dataset, batch_size=12, num_workers=0) # MANAGE BATCH SIZE HERE
 
-# Create validation dataset by taking a finite sample from the training data
-def create_validation_dataset(train_dataset, num_batches):
-    validation_data = []
-    train_iter = iter(train_dataset)
-    for _ in range(num_batches):
-        try:
-            data = next(train_iter)
-            validation_data.append(data)
-        except StopIteration:
-            break
-    return validation_data
+# Load the validation dataset (Wikitext-2)
+validation_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
 
-# Number batches to sample
-num_validation_batches = 100
+# Tokeniz
+tokenized_validation_dataset = validation_dataset.map(
+    tokenize_function,
+    remove_columns=validation_dataset.column_names,
+)
 
-# validation dataset
-validation_data = create_validation_dataset(train_dataset, num_validation_batches)
-validation_dataloader = DataLoader(validation_data, batch_size=12)
+# Group
+lm_validation_dataset = tokenized_validation_dataset.map(
+    group_texts,
+    batched=True,
+    batch_size=1000,
+)
 
-# model configuration
+# Set format for PyTorch
+lm_validation_dataset.set_format(type='torch', columns=['input_ids', 'labels'])
+validation_dataloader = DataLoader(lm_validation_dataset, batch_size=12, num_workers=0) # MANAGE BATCH SIZE HERE
+
 class CustomGPT2Config(GPT2Config):
     def __init__(self, use_pre_layernorm=True, **kwargs):
         super().__init__(**kwargs)
         self.use_pre_layernorm = use_pre_layernorm
 
-# Model with Pre-LayerNorm and Biases aka GPT-3
+# Custom GPT-2 with Pre-LayerNorm and Biases aka GPT-3
 from transformers.models.gpt2.modeling_gpt2 import (
     GPT2LMHeadModel,
     GPT2Model,
@@ -136,7 +153,7 @@ from transformers.models.gpt2.modeling_gpt2 import (
 class CustomGPT2Attention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False):
         super().__init__(config, is_cross_attention)
-        # biases are included in GPT-3
+        # biases are included
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=True)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=True)
 
@@ -145,7 +162,7 @@ class CustomGPT2MLP(GPT2MLP):
         super().__init__(intermediate_size, config)
         self.c_fc = nn.Linear(config.n_embd, intermediate_size, bias=True)
         self.c_proj = nn.Linear(intermediate_size, config.n_embd, bias=True)
-        self.act = nn.GELU()  # standard GeLU, NOT the approximation
+        self.act = nn.GELU()  # Use standard GeLU
 
 class CustomGPT2Block(GPT2Block):
     def __init__(self, config):
@@ -270,11 +287,11 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
-# Model Configuration, here's GPT-3 Small
+# Configuration
 config = CustomGPT2Config(
     vocab_size=tokenizer.vocab_size,
-    n_positions=2048, # Maximum sequence length
-    n_ctx=2048,     # Maximum context size for generation that the model can handle
+    n_positions=2048, # Max position embeddings aka maximum length that the model can handle
+    n_ctx=2048,   # Max context length for generation
     n_embd=768,   # Embedding dimension
     n_layer=12,   # Number of transformer blocks
     n_head=12,    # Number of attention heads
@@ -302,15 +319,15 @@ def custom_init_weights(module):
 
 model.apply(custom_init_weights)
 
+# Move the model to the appropriate device (GPU, MPS, or CPU)
 device = torch.device(
     'cuda' if torch.cuda.is_available() else
     'mps' if torch.backends.mps.is_available() else
     'cpu'
 )
-
 model.to(device)
 
-# optimizer and learning rate scheduler
+# Set up the optimizer and learning rate scheduler
 total_steps = 600000  # desired total training steps
 warmup_steps = 60000  # Typically 10% of total_steps
 
@@ -329,24 +346,38 @@ scheduler = get_cosine_schedule_with_warmup(
     num_training_steps=total_steps
 )
 
-gradient_accumulation_steps = 16 # 1 runs faster as it means no gradient accumulation, 16 is the original value in the GPT-3 paper
+gradient_accumulation_steps = 1 #4
 
-
-##################
-#2048 tokens per batch * 12 batches = 24576 tokens per batch
-#24576 tokens per batch * 16 gradient accumulation steps = 393216 tokens per batch
-#393216 tokens per batch * 600k steps = 235929600000 tokens = 235.9 billion tokens
-##################
-
-
+# gradient clipping
 max_grad_norm = 1.0
 
-# Training loop with gradient accumulation, gradient clipping, and perplexity computation
+# training variables
+global_step = 0  # Moved initialization here for resume functionality
+
+# Resume training if --resume flag is used
+if args.resume:
+    checkpoint_dir = './emergency_checkpoint'
+    if os.path.exists(checkpoint_dir):
+        print("Loading checkpoint from the emergency directory...")
+        # Load model state
+        model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'model_state.pt')))
+        # Load optimizer state
+        optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'optimizer_state.pt')))
+        # Load scheduler state
+        scheduler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scheduler_state.pt')))
+        # Load global_step
+        with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'r') as f:
+            global_step = int(f.readline().strip())
+        print(f"Resumed training from step {global_step}")
+    else:
+        print("No checkpoint found in the emergency directory. Starting from scratch.")
+
+# Training loop
 model.train()
-logging_steps = 100  # Log metrics every logging_steps
+logging_steps = 100
 save_steps = 10000   # Save model every save_steps
-eval_steps = 5000    # Evaluate every eval_steps
-global_step = 0
+eval_steps = 1000    # Evaluate model every eval_steps
+emergency_save_steps = 100  # Save temporary checkpoint every 100 steps
 
 # Use cycle to create an infinite iterator over the dataloader
 train_iterator = cycle(train_dataloader)
@@ -365,7 +396,7 @@ try:
             loss = loss / gradient_accumulation_steps  # Normalize loss
             loss.backward()
 
-        # Gradient Clipping
+        # Apply Gradient Clipping Here
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
         optimizer.step()
@@ -373,12 +404,29 @@ try:
 
         global_step += 1  # Increment global_step after each optimizer step
 
+        # emergency save
+        if global_step % emergency_save_steps == 0:
+            checkpoint_dir = './emergency_checkpoint'
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            # Save model state
+            torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+            # Save optimizer state
+            torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
+            # Save scheduler state
+            torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+            # Save global_step
+            with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
+                f.write(f"{global_step}\n")
+            print(f"Temporary checkpoint saved at step {global_step}.")
+
         # Logging
         if global_step % logging_steps == 0:
+            elapsed_time = time.time() - start_time
+            start_time = time.time()
             avg_loss = accumulated_loss / gradient_accumulation_steps
-            perplexity = math.exp(avg_loss) if avg_loss < 7 else float('inf')  # < 7 because it goes down from 50000 so it just makes the graph look weird
-            print(f"Step {global_step}, Loss: {avg_loss:.4f}, Perplexity: {perplexity:.2f}, Grad Norm: {grad_norm:.4f}")
-            # Log train metrics
+            perplexity = math.exp(avg_loss) if avg_loss < 7 else float('inf')  # To avoid overflow
+            print(f"Step {global_step}, Loss: {avg_loss:.4f}, Perplexity: {perplexity:.2f}, Grad Norm: {grad_norm:.4f}, Time per step: {elapsed_time / logging_steps:.4f} sec")
+            # Log metrics to wandb with 'train/' prefix
             current_lr = scheduler.get_last_lr()[0]
             wandb.log({
                 'train/loss': avg_loss,
@@ -388,13 +436,16 @@ try:
                 'train/step': global_step,
             })
 
-        # Validation
-        if global_step % eval_steps == 0 or global_step == 1:
+        # Validation every eval_steps
+        if global_step % eval_steps == 0 or global_step == 0:
             model.eval()
             val_loss = 0.0
             val_steps = 0
+            max_val_batches = 100  # Limit the number of validation batches
             with torch.no_grad():
-                for batch in validation_dataloader:
+                for i, batch in enumerate(validation_dataloader):
+                    if i >= max_val_batches:
+                        break
                     inputs = {k: v.to(device) for k, v in batch.items()}
                     outputs = model(**inputs)
                     loss = outputs.loss
@@ -402,10 +453,10 @@ try:
                     val_steps += 1
 
             avg_val_loss = val_loss / val_steps
-            val_perplexity = math.exp(avg_val_loss) if avg_val_loss < 20 else float('inf')
+            val_perplexity = math.exp(avg_val_loss) if avg_val_loss < 7 else float('inf')
 
             print(f"Validation at step {global_step}: Loss: {avg_val_loss:.4f}, Perplexity: {val_perplexity:.2f}")
-            # Log validation metrics
+            # Log validation metrics to wandb with 'validation/' prefix
             wandb.log({
                 'validation/loss': avg_val_loss,
                 'validation/perplexity': val_perplexity,
@@ -416,7 +467,7 @@ try:
 
         # Saving the model
         if global_step > 0 and global_step % save_steps == 0:
-            save_path = f'./gpt3-small-fineweb-v5-step-{global_step}'
+            save_path = f'./gpt3-small-fineweb-step-{global_step}'
             model.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
             print(f"Model saved at step {global_step} to {save_path}")
@@ -425,12 +476,22 @@ try:
             break
 except KeyboardInterrupt:
     print("Training interrupted by user. Saving model...")
-    save_path = f'./gpt3-small-fineweb-v5-step-{global_step}'
+    save_path = f'./gpt3-small-fineweb-step-{global_step}'
     model.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
     print(f"Model saved at step {global_step} to {save_path}")
 
-final_save_path = './gpt3-small-fineweb_v5'
+    # Save emergency checkpoint upon interruption
+    checkpoint_dir = './emergency_checkpoint'
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+    torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
+    torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+    with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
+        f.write(f"{global_step}\n")
+    print(f"Emergency checkpoint saved at step {global_step}.")
+
+final_save_path = './gpt3-small-fineweb_v7'
 model.save_pretrained(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"Final model saved to {final_save_path}")
