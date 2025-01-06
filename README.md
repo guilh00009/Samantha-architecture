@@ -53,7 +53,16 @@ python3 train-17m.py
 
 ### Inference
 
-To generate text using the trained model, run:
+I've published three checkpoints on Huggingface:
+- https://huggingface.co/k050506koch/GPT3-dev - 17m checkpoint.
+- https://huggingface.co/k050506koch/GPT3-dev-125m - 125m checkpoint trained on M2 Mac with batch_size=12 and no grad_accum.
+- https://huggingface.co/k050506koch/GPT3-dev-125m-0612 - 125m checkpoint trained longer on rtx 4090 with batch_size=12 and grad_accum=4.
+
+Note for future: currently I’m training another checkpoint with tweaked hyperparameters so it will be even smarter.
+
+To inference one of HuggingFace checkpoints, you can set model_path="k050506koch/GPT3-dev-125m-0612". Don't forget to set trust_remote_code=True because all checkpoints have custom architecture.
+
+To generate text, run:
 
 ```sh
 python inference.py
