@@ -1,4 +1,4 @@
-# eval.py
+# evaluate.py
 
 import torch
 import torch.nn as nn
@@ -7,9 +7,10 @@ from datasets import load_dataset
 import numpy as np
 from tqdm import tqdm
 import gc
+import math
 
 # ----------------------------
-# Custom GPT-2 Model Definitions
+# Model Definitions
 # ----------------------------
 
 class CustomGPT2Config(GPT2Config):
@@ -181,15 +182,17 @@ def load_model_and_tokenizer(model_path, device):
 # Evaluation Functions
 # ----------------------------
 
-def evaluate_on_hellaswag(model, tokenizer, device, temperature=1.0, batch_size=8, block_size=512):
+def evaluate_on_hellaswag(model, tokenizer, device, temperature=None, top_k=None, top_p=None, min_p=None, batch_size=8, block_size=512):
     print("\nStarting HellaSwag Evaluation...\n")
-    # Load HellaSwag validation dataset without streaming
+    # Load HellaSwag validation dataset
     hellaswag_dataset = load_dataset("Rowan/hellaswag", split="validation")
 
     total = 0
     correct = 0
     num_examples = len(hellaswag_dataset)
     num_choices = 4  # HellaSwag has 4 choices per question
+    hellaswag_loss_sum = 0.0
+    hellaswag_token_count = 0
 
     for i in tqdm(range(0, num_examples, batch_size), desc="Evaluating HellaSwag"):
         batch = hellaswag_dataset[i:i+batch_size]
@@ -226,7 +229,9 @@ def evaluate_on_hellaswag(model, tokenizer, device, temperature=1.0, batch_size=
                 attention_mask=attention_mask,
                 labels=input_ids
             )
-            logits = outputs.logits / temperature
+            logits = outputs.logits
+            if temperature is not None:
+                logits = logits / temperature
 
             # Shift logits and labels to align them
             shift_logits = logits[..., :-1, :].contiguous()
@@ -240,6 +245,8 @@ def evaluate_on_hellaswag(model, tokenizer, device, temperature=1.0, batch_size=
             )
             loss_per_token = loss_per_token.view(shift_labels.size())
             loss_per_example = loss_per_token.sum(dim=1)
+            hellaswag_loss_sum += loss_per_token.sum().item()
+            hellaswag_token_count += shift_labels.numel()
 
             # Reshape losses to [batch_size, num_choices]
             actual_batch_size = len(batch['ctx'])
@@ -253,10 +260,12 @@ def evaluate_on_hellaswag(model, tokenizer, device, temperature=1.0, batch_size=
             correct += (predicted_labels == labels_tensor).sum().item()
 
     accuracy = correct / total
-    print(f"\nHellaSwag Accuracy: {accuracy:.4f}\n")
+    hellaswag_perplexity = math.exp(hellaswag_loss_sum / hellaswag_token_count) if hellaswag_token_count > 0 else float('inf')
+    print(f"\nHellaSwag Accuracy: {accuracy:.4f}")
+    print(f"HellaSwag Perplexity: {hellaswag_perplexity:.4f}")
     return accuracy
 
-def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, block_size=512, task='abstract_algebra'):
+def evaluate_on_mmlu(model, tokenizer, device, temperature=None, top_k=None, top_p=None, min_p=None, batch_size=8, block_size=512, task='abstract_algebra'):
     print(f"\nStarting MMLU Evaluation on task: {task}\n")
     # Load MMLU dataset with the correct subtask name
     try:
@@ -275,6 +284,8 @@ def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, bl
     correct = 0
     num_examples = len(mmlu_dataset)
     num_choices = 4  # MMLU has 4 choices per question
+    task_loss_sum = 0.0
+    task_token_count = 0
 
     for i in tqdm(range(0, num_examples, batch_size), desc=f"Evaluating MMLU ({task})"):
         batch = mmlu_dataset[i:i + batch_size]
@@ -309,7 +320,9 @@ def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, bl
                 attention_mask=attention_mask,
                 labels=input_ids
             )
-            logits = outputs.logits / temperature
+            logits = outputs.logits
+            if temperature is not None:
+                logits = logits / temperature
 
             # Shift logits and labels to align them
             shift_logits = logits[..., :-1, :].contiguous()
@@ -323,6 +336,8 @@ def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, bl
             )
             loss_per_token = loss_per_token.view(shift_labels.size())
             loss_per_example = loss_per_token.sum(dim=1)
+            task_loss_sum += loss_per_token.sum().item()
+            task_token_count += shift_labels.numel()
 
             # Reshape losses to [batch_size, num_choices]
             actual_batch_size = len(batch['question'])
@@ -336,8 +351,118 @@ def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, bl
             correct += (predicted_labels == labels_tensor).sum().item()
 
     accuracy = correct / total
-    print(f"\nMMLU Accuracy on '{task}': {accuracy:.4f}\n")
-    return accuracy
+    task_perplexity = math.exp(task_loss_sum / task_token_count) if task_token_count > 0 else float('inf')
+    print(f"\nMMLU Accuracy on '{task}': {accuracy:.4f}")
+    print(f"MMLU Perplexity on '{task}': {task_perplexity:.4f}")
+    return accuracy, task_perplexity
+
+def evaluate_on_lambada(model, tokenizer, device, temperature=None, top_k=None, top_p=None, min_p=None, batch_size=8, block_size=512):
+    print("\nStarting LAMBADA Evaluation...\n")
+    # Load the LAMBADA test split
+    lambada_dataset = load_dataset("lambada", split="test")
+    
+    total = 0
+    correct = 0
+    num_examples = len(lambada_dataset)
+    lambada_loss_sum = 0.0
+    lambada_token_count = 0
+    final_token_correct = 0
+    final_token_total = 0
+    
+    for i in tqdm(range(0, num_examples, batch_size), desc="Evaluating LAMBADA"):
+        batch = lambada_dataset[i:i+batch_size]
+    
+        sentences = batch['text']
+        # Initialize lists for contexts and target words
+        contexts = []
+        targets = []
+    
+        for sentence in sentences:
+            # Split the sentence into words
+            tokens = sentence.strip().split()
+            if len(tokens) < 2:
+                # If the sentence is too short, skip this example
+                continue
+            # The target is the last word
+            target = tokens[-1]
+            # The context is the sentence without the last word
+            context = ' '.join(tokens[:-1])
+            contexts.append(context)
+            targets.append(target)
+    
+        # Tokenize the contexts
+        tokenized_inputs = tokenizer(
+            contexts,
+            return_tensors='pt',
+            padding=True,
+            truncation=True,
+            max_length=block_size
+        )
+    
+        input_ids = tokenized_inputs['input_ids'].to(device)
+        attention_mask = tokenized_inputs['attention_mask'].to(device)
+    
+        with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=input_ids
+            )
+            logits = outputs.logits
+            if temperature is not None:
+                logits = logits / temperature
+
+            if top_k is not None or top_p is not None or min_p is not None:
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                if top_k:
+                    topk_vals, _ = torch.topk(probs, top_k, dim=-1)
+                    thresh = topk_vals[..., -1, None]
+                    probs = torch.where(probs < thresh, torch.zeros_like(probs), probs)
+
+                if top_p:
+                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+                    cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
+                    cutoff = (cumsum_probs > top_p).float().cumsum(dim=-1)
+                    sorted_probs = torch.where(cutoff > 0, torch.zeros_like(sorted_probs), sorted_probs)
+                    probs = torch.zeros_like(probs).scatter_(-1, sorted_indices, sorted_probs)
+
+                if min_p:
+                    probs = torch.where(probs < min_p, torch.zeros_like(probs), probs)
+
+                probs = probs / probs.sum(dim=-1, keepdim=True)
+                predicted_ids = torch.multinomial(probs.view(-1, probs.size(-1)), 1).view(probs.size(0), -1)
+            else:
+                predicted_ids = torch.argmax(logits, dim=-1)
+
+            correct += (predicted_ids == input_ids).sum().item()
+            total += torch.numel(input_ids)
+
+            # Shift logits and labels for loss
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
+            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            loss_per_token = loss_fct(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1)
+            )
+            lambada_loss_sum += loss_per_token.sum().item()
+            lambada_token_count += shift_labels.numel()
+
+            # Final-token accuracy fix
+            final_token_ids = predicted_ids[:, -1]
+            gold_token_ids = input_ids[:, -1]
+            final_token_correct += (final_token_ids == gold_token_ids).sum().item()
+            final_token_total += gold_token_ids.size(0)
+    
+    lambada_accuracy = correct / total if total > 0 else 0
+    lambada_perplexity = math.exp(lambada_loss_sum / lambada_token_count) if lambada_token_count > 0 else float('inf')
+    final_token_accuracy = final_token_correct / final_token_total if final_token_total > 0 else 0
+
+    print(f"\nLAMBADA Token-by-Token Accuracy: {lambada_accuracy:.4f}")
+    print(f"LAMBADA Perplexity: {lambada_perplexity:.4f}")
+    print(f"Final Token Accuracy: {final_token_accuracy:.4f}")
+    return lambada_accuracy
+
 
 
 # ----------------------------
@@ -346,14 +471,30 @@ def evaluate_on_mmlu(model, tokenizer, device, temperature=1.0, batch_size=8, bl
 
 if __name__ == '__main__':
     # Configuration
-    MODEL_PATH = "gpt3-small-fineweb-sft"  # Replace with your model path
+    MODEL_PATH = "local_model_path" #k050506koch/GPT3-dev-125m-0612
+    
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    TEMPERATURE = 1.0
+    TEMPERATURE = None #0.7
+    TOP_K = 40
+    TOP_P = 0.95
+    MIN_P = 0.5
     BATCH_SIZE = 8
-    BLOCK_SIZE = 512
+    BLOCK_SIZE = 64
 
     # Load model and tokenizer
     model, tokenizer = load_model_and_tokenizer(MODEL_PATH, DEVICE)
+    
+    lambada_accuracy = evaluate_on_lambada(
+        model=model,
+        tokenizer=tokenizer,
+        device=DEVICE,
+        temperature=TEMPERATURE,
+        # top_k=None, top_p=None, min_p=None # optional
+        batch_size=BATCH_SIZE,
+        block_size=BLOCK_SIZE
+    )
+    print(f"LAMBADA Accuracy: {lambada_accuracy:.4f}")
+    gc.collect()
 
     # Evaluate on HellaSwag
     hellaswag_accuracy = evaluate_on_hellaswag(
@@ -364,10 +505,9 @@ if __name__ == '__main__':
         batch_size=BATCH_SIZE,
         block_size=BLOCK_SIZE
     )
-
+    gc.collect()
+    
     # Evaluate on MMLU
-    # Specify the MMLU task you want to evaluate on
-    # Example tasks: 'abstract_algebra', 'college_biology', etc.
     """MMLU_TASK = 'abstract_algebra'  # Change as needed
 
     mmlu_accuracy = evaluate_on_mmlu(
@@ -379,9 +519,6 @@ if __name__ == '__main__':
         block_size=BLOCK_SIZE,
         task=MMLU_TASK
     )"""
-
-    # Optional: Evaluate on multiple MMLU tasks
-    # Uncomment the following lines to evaluate on all available MMLU tasks
     
     mmlu_tasks = [
         'abstract_algebra', 'anatomy', 'astronomy', 'business_ethics', 'clinical_knowledge',
@@ -399,9 +536,10 @@ if __name__ == '__main__':
         'professional_medicine', 'professional_psychology', 'public_relations', 'security_studies',
         'sociology', 'us_foreign_policy', 'virology', 'world_religions'
     ]
-
+    scores = []
+    mmlu_perplexities = []
     for task in mmlu_tasks:
-        mmlu_accuracy = evaluate_on_mmlu(
+        mmlu_accuracy, mmlu_perplexity = evaluate_on_mmlu(
             model=model,
             tokenizer=tokenizer,
             device=DEVICE,
@@ -410,7 +548,14 @@ if __name__ == '__main__':
             block_size=BLOCK_SIZE,
             task=task
         )
+        scores.append(mmlu_accuracy)
+        mmlu_perplexities.append(mmlu_perplexity)
         gc.collect()
 
+    mmlu_average = np.mean(scores)
+    mmlu_average_pp = np.mean(mmlu_perplexities)
+    print(f"MMLU Average Accuracy: {mmlu_average:.4f}")
+    print(f"MMLU Average Perplexity: {mmlu_average_pp:.4f}")
+    
+    # Summary of Results
     print("Evaluation Completed.")
-    print(f"HellaSwag Accuracy: {hellaswag_accuracy:.4f}")
