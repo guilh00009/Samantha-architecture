@@ -9,7 +9,7 @@ import math
 
 # Custom Configuration and Model Classes (must match those used during training)
 class CustomGPT2Config(GPT2Config):
-    model_type = "custom_gpt2"
+    #model_type = "gpt3dev"
 
     def __init__(self, use_pre_layernorm=True, **kwargs):
         super().__init__(**kwargs)
@@ -37,8 +37,8 @@ class CustomGPT2Attention(GPT2Attention):
         layer_past=None,
         attention_mask=None,
         head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
+        encoder_hidden_states=None,        # Added this parameter
+        encoder_attention_mask=None,       # Added this parameter
         use_cache=False,
         output_attentions=False,
     ):
@@ -75,8 +75,8 @@ class CustomGPT2Block(GPT2Block):
         layer_past=None,
         attention_mask=None,
         head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
+        encoder_hidden_states=None,        # Added this parameter
+        encoder_attention_mask=None,       # Added this parameter
         use_cache=False,
         output_attentions=False,
     ):
@@ -215,7 +215,7 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
         )
 
 # Helper function for top-k and nucleus (top-p) sampling
-def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf'), min_p=0.05):
     """Filter a distribution of logits using top-k and/or nucleus (top-p) filtering."""
     logits = logits.clone()
 
@@ -241,9 +241,17 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
         indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
         logits[indices_to_remove] = filter_value
 
+    if min_p == 0.0:
+        return logits
+    else:
+        # min_p
+        probabilities = torch.softmax(logits, dim=-1)
+        low_prob_mask = probabilities < min_p
+        logits[low_prob_mask] = filter_value
+
     return logits
 
-def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_p, top_k, repetition_penalty=1.2, no_repeat_ngram_size=3):
+def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_p, top_k, min_p, repetition_penalty=1.2, no_repeat_ngram_size=3, streaming=True):
     model.eval()
     device = next(model.parameters()).device
     input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
@@ -281,7 +289,7 @@ def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_
                 next_token_logits[0, banned_tokens] = -float('inf')
 
             # Apply top_k and top_p filtering
-            filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+            filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p, min_p=min_p)
             probabilities = torch.softmax(filtered_logits, dim=-1)
 
             # Sample the next token
@@ -296,7 +304,8 @@ def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_
 
             # Decode and print the new token
             generated_token = tokenizer.decode(next_token[0], skip_special_tokens=False)
-            print(generated_token, end='', flush=True)
+            if streaming == True:
+                print(generated_token, end='', flush=True)
             generated_text += generated_token
 
             # Stop if EOS token is generated
@@ -307,38 +316,40 @@ def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_
 
 # Main script
 def main():
-    model_path = 'gpt3-small-fineweb'
-
-    # tokenizer
+    model_path = "k050506koch/GPT3-dev-125m-0612" # or a local path
+    
+    # Load the tokenizer
     tokenizer = GPT2TokenizerFast.from_pretrained(model_path)
     tokenizer.pad_token = tokenizer.eos_token
 
-    # custom configuration
+    # Load the custom configuration
     config = CustomGPT2Config.from_pretrained(model_path)
 
     # Load the model
     model = CustomGPT2LMHeadModel.from_pretrained(model_path, config=config)
+    model.eval()
+    model = torch.compile(model, mode="max-autotune")
 
     # Move the model to the appropriate device
-    device = torch.device("cpu") # interesting, on inference cpu is faster than mps on M2 MacBook
+    device = torch.device("cpu") # interesting, cpu inference is faster than mps on m2 macbook air, change for "cuda", "rocm", etc
     model.to(device)
-
+    
     # Get user input
-    prompt = input("Enter a prompt: ")
-
+    prompt = input(f"Enter a prompt: ")
     # Generate text
     generate_text_stream( #generated_text = 
         prompt,
         model,
         tokenizer,
-        max_length=512,  
-        temperature=1.0, #0.1 is great for pre-trained only model which was undertrained
+        max_length=512,
+        temperature=0.7, #0.1 is great for pre-trained only model
         repetition_penalty=2.0,
         no_repeat_ngram_size=2,
         top_p=0.95,
-        top_k=20, #200 is too much, 50 is good, 20 is even better
+        min_p=0.05,
+        top_k=50, #200 is too much but works very good with model from H100, 50 is good, should try 20
+        streaming=True,
     )
     print("\n\n")
-
 if __name__ == "__main__":
     main()
