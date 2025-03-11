@@ -20,7 +20,7 @@ import sys
 
 start_time = time.time()
 
-torch.set_default_dtype = torch.bfloat16
+torch.set_default_dtype(torch.bfloat16)
 
 parser = argparse.ArgumentParser(description='Training script with resume functionality.')
 parser.add_argument('--resume', action='store_true', help='Resume training from the last checkpoint.')
@@ -115,10 +115,10 @@ class StreamDataset(IterableDataset):
 train_dataset = StreamDataset(grouped_dataset)
 train_dataloader = DataLoader(train_dataset, batch_size=12, num_workers=0) # MANAGE BATCH SIZE HERE
 
-# Load the validation dataset (Wikitext-2)
+# Velidate on different dataset to test how well the model generalizes
 validation_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
 
-# Tokeniz
+# Tokenize
 tokenized_validation_dataset = validation_dataset.map(
     tokenize_function,
     remove_columns=validation_dataset.column_names,
@@ -408,13 +408,9 @@ try:
         if global_step % emergency_save_steps == 0:
             checkpoint_dir = './emergency_checkpoint'
             os.makedirs(checkpoint_dir, exist_ok=True)
-            # Save model state
             torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
-            # Save optimizer state
             torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
-            # Save scheduler state
             torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
-            # Save global_step
             with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
                 f.write(f"{global_step}\n")
             print(f"Temporary checkpoint saved at step {global_step}.")
@@ -424,7 +420,7 @@ try:
             elapsed_time = time.time() - start_time
             start_time = time.time()
             avg_loss = accumulated_loss / gradient_accumulation_steps
-            perplexity = math.exp(avg_loss) if avg_loss < 7 else float('inf')  # To avoid overflow
+            perplexity = math.exp(avg_loss) if avg_loss < 7 else float('inf')  # To avoid overflow, fix later
             print(f"Step {global_step}, Loss: {avg_loss:.4f}, Perplexity: {perplexity:.2f}, Grad Norm: {grad_norm:.4f}, Time per step: {elapsed_time / logging_steps:.4f} sec")
             # Log metrics to wandb with 'train/' prefix
             current_lr = scheduler.get_last_lr()[0]
@@ -475,13 +471,13 @@ try:
         if global_step >= total_steps:
             break
 except KeyboardInterrupt:
+    # Save emergency checkpoint upon interruption
     print("Training interrupted by user. Saving model...")
     save_path = f'./gpt3-small-fineweb-step-{global_step}'
     model.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
     print(f"Model saved at step {global_step} to {save_path}")
 
-    # Save emergency checkpoint upon interruption
     checkpoint_dir = './emergency_checkpoint'
     os.makedirs(checkpoint_dir, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
@@ -491,7 +487,7 @@ except KeyboardInterrupt:
         f.write(f"{global_step}\n")
     print(f"Emergency checkpoint saved at step {global_step}.")
 
-final_save_path = './gpt3-small-fineweb_v7'
+final_save_path = './gpt3-small-fineweb'
 model.save_pretrained(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"Final model saved to {final_save_path}")

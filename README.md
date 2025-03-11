@@ -5,7 +5,7 @@ Welcome to the GPT3 repository! This project is an attempt to recreate the archi
 ## Repository Structure
 
 - **[train-17m.py](train-17m.py)**: Script for training the GPT-3 model which has 17M (17,867,008) parameters.
-- **[train_125m.py](train_125m.py)**: Script for training the GPT-3 model with cross-validation.
+- **[train_125m.py](train-125m.py)**: Script for training the GPT-3 model with cross-validation.
 - **[inference.py](inference.py)**: Script for running inference with the trained GPT-3 model.
 - **[fine-tune-SFT.py](fine-tune-SFT.py)**: Script for testing and fine-tuning the GPT-3 model with Supervised Fine-Tuning (SFT).
 
@@ -44,12 +44,13 @@ Welcome to the GPT3 repository! This project is an attempt to recreate the archi
 To train the model, run the following command:
 
 ```sh
+# on Windows use
 python train-17m.py
 
 # on MacOS or Linux it's 
 python3 train-17m.py
 ```
-### Note: training is very memory-consuming task, if you don't have that much VRAM, you can "trade" compute to memory by reducing batch size and increasing gradient accumulation steps
+#### Note: training is very memory-consuming task, if you don't have that much VRAM, you can "trade" compute to memory by reducing batch size and increasing gradient accumulation steps
 
 ### Inference
 
@@ -57,10 +58,17 @@ I've published three checkpoints on Huggingface:
 - https://huggingface.co/k050506koch/GPT3-dev - 17m checkpoint.
 - https://huggingface.co/k050506koch/GPT3-dev-125m - 125m checkpoint trained on M2 Mac with batch_size=12 and no grad_accum.
 - https://huggingface.co/k050506koch/GPT3-dev-125m-0612 - 125m checkpoint trained longer on rtx 4090 with batch_size=12 and grad_accum=4.
+- https://huggingface.co/k050506koch/GPT3-dev-125m-1202 - the newest checkpoint (also 125m) which was trained without a cloud (M2 MacBook Air, batch size=12; grad_accum steps were from 4 to 16 (increased to the end when loss started plateuting)). This checkpoint scores 27.31% on MMLU which is a little higher than 
 
 Note for future: currently I’m training another checkpoint with tweaked hyperparameters so it will be even smarter.
 
 To inference one of HuggingFace checkpoints, you can set model_path="k050506koch/GPT3-dev-125m-0612". Don't forget to set trust_remote_code=True because all checkpoints have custom architecture.
+
+I have also published gguf checkpoints in same repositories on HuggingFace, so they can be inferred with LM Studio or llama.cpp:
+
+```sh
+lms get k050506koch/GPT3-dev-125m-0612
+```
 
 To generate text, run:
 
@@ -74,7 +82,17 @@ python3 inference.py
 ### Fine-Tuning
 
 If you have trained a foundation model, then you may want to Supervised Fine-Tune it for chat or any other purpose.
+
+For this, i use HuggingFace TRL package, you should install it before fine-tuning:
+
 ```sh
+pip install trl
+```
+
+Then, start the training:
+
+```sh
+# on Windows
 python fine-tune-SFT.py
 
 # on MacOS or Linux
@@ -95,11 +113,13 @@ You can also download weights from HuggingFace:
 
 17 million parameters: https://huggingface.co/k050506koch/GPT3-dev (architecture demonstrator)
 
-125 million parameters: https://huggingface.co/k050506koch/GPT3-dev-125m (more like an actual implementation)
+125 million parameters: https://huggingface.co/k050506koch/GPT3-dev-125m-1202 (more like an actual implementation, the most recent model)
 
-To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310). This will work for both HuggingFace-based models of **same architecture** and locally-based ones. To download a remote-hosted model, type "k050506koch/GPT3-dev-125m" into [model_path = ""](inference.py#L310).
+To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310). This will work for both HuggingFace-based models of **same architecture** and locally-based ones. To download a remote-hosted model, type "k050506koch/GPT3-dev-125m-1202" into [model_path = ""](inference.py#L310).
 
-#### Note: Both these models are highly undertrained due to my computational budget. Both models underwent 600,000 training steps with a batch size of 12 and a sequence length of 512, totaling approximately 3.7 billion tokens (512 * 12 * 600,000 = 3,686,400,000). (This is a very small amount for the model of this size. For example, OpenAI trained their GPT-3 model series on 300 Bn tokens.)
+#### Note: All these models are highly undertrained due to my computational budget. Some of them underwent 600,000 training steps with a batch size of 12 and a sequence length of 512, totaling approximately 3.7 billion tokens (512 * 12 * 600,000 = 3,686,400,000). (This is a very small amount for the model of this size. For example, OpenAI trained their GPT-3 model series on 300 Bn tokens.)
+
+#### The most recent one underwent 60,000 steps (1/10th of total training) and already shows better performance and coherence than others. Curently I am still training it, i think this will lead to even better results.
 
 ## Custom Components
 

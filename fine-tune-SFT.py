@@ -1,6 +1,3 @@
-# Install necessary libraries (uncomment if not already installed)
-# !pip install transformers datasets wandb evaluate
-
 import os
 import math
 import torch
@@ -15,15 +12,22 @@ from transformers import (
     DataCollatorForLanguageModeling,
     TrainerCallback,
 )
+from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 import wandb
 from itertools import islice, cycle
 import evaluate
+from lion_pytorch import Lion
+
+import os
+
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"]="0.0"
+#os.environ["WANDB_OFFLINE"]="1" # if you want to run offline
 
 # ---------------------------
 # Initialize Weights & Biases (W&B / Wandb)
 # ---------------------------
-wandb.init(project='gpt3-small-fineweb-sft', name='sft-training')
+wandb.init(project='gpt3-small-fineweb', name='sft-no_robots')
 
 # ---------------------------
 # Model Classes
@@ -145,194 +149,297 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
 
         self.init_weights()
 
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        labels=None,
-        past_key_values=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        **kwargs,  # Capture all additional keyword arguments
-    ):
-        transformer_outputs = self.transformer(
-            input_ids,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            **kwargs,  # Pass additional arguments
-        )
-        hidden_states = transformer_outputs[0]
+def forward(
+    self,
+    input_ids=None,
+    attention_mask=None,
+    labels=None,
+    past_key_values=None,
+    use_cache=None,
+    output_attentions=None,
+    output_hidden_states=None,
+    return_dict=None,
+    **kwargs,  # Capture all additional keyword arguments
+):
+    # we don't need to pass num_items_in_batch to the transformer
+    kwargs.pop("num_items_in_batch", None)
 
-        lm_logits = self.lm_head(hidden_states)
+    transformer_outputs = self.transformer(
+        input_ids,
+        attention_mask=attention_mask,
+        past_key_values=past_key_values,
+        use_cache=use_cache,
+        output_attentions=output_attentions,
+        output_hidden_states=output_hidden_states,
+        return_dict=return_dict,
+        **kwargs,  # Pass additional arguments (без num_items_in_batch)
+    )
+    hidden_states = transformer_outputs[0]
 
-        loss = None
-        if labels is not None:
-            # Shift the logits and labels for causal language modeling
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+    lm_logits = self.lm_head(hidden_states)
 
-        if not return_dict:
-            output = (lm_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+    loss = None
+    if labels is not None:
+        # Shift the logits and labels for causal language modeling
+        shift_logits = lm_logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        return CausalLMOutputWithCrossAttentions(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-            cross_attentions=transformer_outputs.cross_attentions,
-        )
+    if not return_dict:
+        output = (lm_logits,) + transformer_outputs[1:]
+        return ((loss,) + output) if loss is not None else output
+
+    return CausalLMOutputWithCrossAttentions(
+        loss=loss,
+        logits=lm_logits,
+        past_key_values=transformer_outputs.past_key_values,
+        hidden_states=transformer_outputs.hidden_states,
+        attentions=transformer_outputs.attentions,
+        cross_attentions=transformer_outputs.cross_attentions,
+    )
+
+
+def custom_collate(examples):
+    # get maximum length of input_ids and use it for padding
+    max_length = max(len(ex["input_ids"]) for ex in examples)
+    
+    input_ids = []
+    attention_masks = []
+    labels = []
+    
+    for ex in examples:
+        seq_len = len(ex["input_ids"])
+        pad_length = max_length - seq_len
+        
+        # now we can pad the input_ids, attention_mask and labels
+        padded_ids = ex["input_ids"] + [tokenizer.pad_token_id] * pad_length
+        # attention_mask is 1 for real tokens and 0 for padding
+        padded_mask = ex["attention_mask"] + [0] * pad_length
+        # for labels, we use -100 for padding and the rest of the labels as is
+        # Note: -100 is the ignore_index for CrossEntropyLoss
+        padded_labels = ex["labels"] + [-100] * pad_length
+        
+        input_ids.append(padded_ids)
+        attention_masks.append(padded_mask)
+        labels.append(padded_labels)
+        
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
+
 
 
 # ---------------------------
-#  Tokenizer and Model
+# Initialize the Tokenizer
 # ---------------------------
-tokenizer = GPT2TokenizerFast.from_pretrained('./gpt3-small-fineweb')  # pre-trained model
+tokenizer = GPT2TokenizerFast.from_pretrained('gpt3-small-fineweb')  # Pre-trained model
 tokenizer.pad_token = tokenizer.eos_token
 
-config = GPT2Config.from_pretrained('./gpt3-small-fineweb')
+# ---------------------------
+#  Pre-trained Model
+# ---------------------------
+config = GPT2Config.from_pretrained('gpt3-small-fineweb')
 
-model = CustomGPT2LMHeadModel.from_pretrained('./gpt3-small-fineweb', config=config)
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+# Initialize the custom model with the loaded configuration
+model = CustomGPT2LMHeadModel.from_pretrained('gpt3-small-fineweb', config=config)
+print("Fine-tuning model with" , model.num_parameters(), "parameters")
+device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
 model.to(device)
 
 # ---------------------------
-# Load and Prepare the Dataset
+# Load and Prepare the no_robots Dataset
 # ---------------------------
-helpsteer_train_dataset = load_dataset("nvidia/HelpSteer", split="train")
-helpsteer_eval_dataset = load_dataset("nvidia/HelpSteer", split="validation")
+no_robots_train_dataset = load_dataset("HuggingFaceH4/no_robots", split="train")
+no_robots_eval_dataset = load_dataset("HuggingFaceH4/no_robots", split="test")
 
-def preprocess(sample):
+# Preprocess the dataset
+def preprocess_no_robots(sample, idx):
     """
-    Concatenates the prompt and response, tokenizes them, and sets labels to -100 for prompt tokens
-    to ignore them during loss computation.
+        Formats an example for SFT with dynamic sequence length.
+        First, tokenize the entire conversation without truncation, compute labels,
+        and then truncate the sequence to max_length.
     """
-    # Concatenate prompt and response with eos_token as separator
-    concatenated = sample["prompt"] + tokenizer.eos_token + sample["response"] + tokenizer.eos_token
+    max_length = 1024  # can be 2048 for other dataaset but now it works fine
+    messages = sample["messages"]
+    conversation = ""
     
-    # Tokenize the concatenated text
+    # Build the complete conversation first
+    for msg in messages:
+        role = msg["role"].capitalize()
+        content = msg["content"]
+        conversation += f"{role}: {content}{tokenizer.eos_token}\n"
+    
+    if idx < 2:
+        if len(messages) >= 2:
+            user_message = messages[0]["content"]
+            assistant_message = messages[1]["content"]
+            pair = f"User: {user_message}{tokenizer.eos_token}\nAssistant: {assistant_message}{tokenizer.eos_token}"
+            print("\n=== Processed sample ===")
+            print(pair)
+            print("=== End of example ===\n")
+        else:
+            print("\nNo complete user-assistant pair found in the sample.\n")
+    
     tokenized = tokenizer(
-        concatenated,
-        truncation=True,
-        padding="max_length",
-        max_length=512,
-        return_tensors="pt"
+        conversation,
+        truncation=False,
+        padding=False,
     )
+    input_ids = tokenized["input_ids"]
+    attention_mask = tokenized["attention_mask"]
+
+    labels = [-100] * len(input_ids)
     
-    input_ids = tokenized["input_ids"].squeeze()
-    attention_mask = tokenized["attention_mask"].squeeze()
-    
-    # length of the prompt
-    prompt_length = len(tokenizer(sample["prompt"], truncation=True, max_length=512)["input_ids"])
-    
-    # Init labels with -100 (ignore)
-    labels = torch.full(input_ids.shape, -100)
-    
-    # Tokenize the response to find its length
-    response_tokenized = tokenizer(sample["response"], truncation=True, max_length=512)
-    response_length = len(response_tokenized["input_ids"])
-    
-    # Set labels for the response tokens
-    labels[prompt_length + 1 : prompt_length + 1 + response_length] = input_ids[prompt_length + 1 : prompt_length + 1 + response_length]
-    
+    # Define the ranges of tokens for assistant messages
+    assistant_indices = []
+    cumulative_length = 0
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        role_tokens = tokenizer(f"{role}: ", add_special_tokens=False)["input_ids"]
+        content_tokens = tokenizer(content, add_special_tokens=False)["input_ids"]
+        total_tokens = len(role_tokens) + len(content_tokens) + 1  # +1 for eos_token
+        if role.lower() == "assistant":
+            assistant_indices.append((cumulative_length, cumulative_length + len(role_tokens) + len(content_tokens)))
+        cumulative_length += total_tokens
+
+    for start, end in assistant_indices:
+        if start < len(input_ids):
+            end = min(end, len(input_ids))
+            labels[start:end] = input_ids[start:end]
+
+    if len(input_ids) > max_length:
+        input_ids = input_ids[:max_length]
+        attention_mask = attention_mask[:max_length]
+        labels = labels[:max_length]
+
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
     }
 
+# Apply preprocessing to the datasets
+processed_no_robots_train = no_robots_train_dataset.map(
+    preprocess_no_robots,
+    remove_columns=no_robots_train_dataset.column_names,
+    with_indices=True,
+)
+
+processed_no_robots_eval = no_robots_eval_dataset.map(
+    preprocess_no_robots,
+    remove_columns=no_robots_eval_dataset.column_names,
+    with_indices=True,
+)
+
+# ---------------------------
+# Define the compute_metrics Function
+# ---------------------------
 """def compute_metrics(eval_pred):
-        logits, labels = eval_pred
-        predictions = torch.tensor(logits).argmax(dim=-1)
-        # Compute Cross-Entropy Loss
-        loss_fct = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
-        loss = loss_fct(torch.tensor(logits).view(-1, logits.shape[-1]), torch.tensor(labels).view(-1))
-        perplexity = math.exp(loss.item())
-        return {"eval_perplexity": perplexity}      #caused an error, so I commented it out.
+    logits, labels = eval_pred
+    # Move tensors to CPU for computation
+    predictions = torch.tensor(logits).argmax(dim=-1)
+    labels = torch.tensor(labels)
+
+    # Compute Cross-Entropy Loss
+    loss_fct = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
+    # Flatten the tensors
+    shift_logits = logits[..., :-1, :].reshape(-1, logits.shape[-1])
+    shift_labels = labels[..., 1:].reshape(-1)
+    loss = loss_fct(torch.tensor(shift_logits), torch.tensor(shift_labels))
+    perplexity = math.exp(loss.item())
+    return {"eval_perplexity": perplexity}
 """
 
-processed_train_dataset = helpsteer_train_dataset.map(
-    preprocess,
-    remove_columns=helpsteer_train_dataset.column_names
-)
-
-processed_eval_dataset = helpsteer_eval_dataset.map(
-    preprocess,
-    remove_columns=helpsteer_eval_dataset.column_names
-)
-
 # ---------------------------
-# Training Args for SFT
+# Define Training Arguments for SFT
 # ---------------------------
-training_args = TrainingArguments(
-    output_dir='./outputs-sft',
+training_args = SFTConfig(
+    output_dir='./outputs-sft-helpsteer+no_robots',
+    save_steps=200,
     overwrite_output_dir=True,
-    lr_scheduler_type="cosine",
-    num_train_epochs=3,                  # Train for 3 epochs
-    per_device_train_batch_size=4,       # Adjust based on GPU memory
-    per_device_eval_batch_size=8,        # Adjust based on GPU memory
-    gradient_accumulation_steps=4,       # To simulate larger batch sizes
+    num_train_epochs=3,#6                   # works fine with 3
+    per_device_train_batch_size=12,       # Adjust based on GPU memory
+    per_device_eval_batch_size=12,        # Adjust based on GPU memory
+    gradient_accumulation_steps=4,        # To simulate larger batch sizes
     eval_strategy="steps",
+    bf16=True,
+    lr_scheduler_type="cosine", ###
+    optim="adamw_hf", #adamw_torch
+    remove_unused_columns=True,
+    #deepspeed=True, ###
     eval_on_start=True,
-    eval_steps=500,                      # Evaluate every 500 steps
-    save_steps=1000,                     # Save model every 1000 steps
-    logging_steps=100,                   # Log metrics every 100 steps
-    learning_rate=3e-5,                  # Lower learning rate because we fine-tune
-    warmup_steps=500,                    # Warmup steps for scheduler
+    eval_steps=50,                      # Evaluate every 500 steps
+    #save_steps=200,                     # Save model every 1000 steps
+    logging_steps=1,                   # Log metrics every 100 steps
+    learning_rate=1e-4, #3e-5                 # Lower learning rate for fine-tuning
+    warmup_steps=200,                    #500# Warmup steps for scheduler
     save_total_limit=3,                  # Limit the total number of saved models
-    report_to=['wandb'],                 # Logging to W&B
-    run_name='sft-training',
+    report_to=['wandb'],                 # Enable logging to W&B
+    run_name='sft-training-no_robots',
     load_best_model_at_end=True,         # Load the best model when finished training
-    metric_for_best_model='eval_loss',   # here we use eval_loss or eval_perplexity (don't forget to uncomment compute_metrics)
-    greater_is_better=False,
+    metric_for_best_model='eval_loss',   # eval_perplexity
+    greater_is_better=False,             # Lower perplexity is better
 )
 
 # ---------------------------
-# Initialize the Data Collator and Trainer
+# Initialize the Data Collator
 # ---------------------------
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer,
-    mlm=False,  # Set to False for causal language modeling
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=processed_train_dataset,
-    eval_dataset=processed_eval_dataset,
-    tokenizer=tokenizer,
-    data_collator=data_collator,
-    #compute_metrics=compute_metrics
-)
+#data_collator = CustomDataCollatorForLanguageModeling(
+#    tokenizer=tokenizer,
+    #mlm=False,  # Set to False for causal language modeling
+#) # delete this later, we don't need it
 
 # ---------------------------
-# Callback to log some sequences during the run
+# Define a Callback to Generate and Log Sample Outputs
 # ---------------------------
 class GenerateTextCallback(TrainerCallback):
-    def on_step_end(self, args, state, control, model=None, tokenizer=None, **kwargs):
-        if state.global_step % 1000 == 0 and state.global_step != 0:
-            prompt = "Once upon a time"
-            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-            # Pass attention_mask to generate
-            outputs = model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_length=512,
-                num_return_sequences=1,
-                no_repeat_ngram_size=2,
-                #early_stopping=True
-            )
-            text = tokenizer.decode(outputs[0], skip_special_tokens=False)
-            wandb.log({"sample_text": wandb.Html(f"<p>{text}</p>"), "step": state.global_step}) # we log sample texts as html and send them to wandb
+    def on_step_end(self, args, state, control, **kwargs):
+        # Retrieve the model and tokenizer from kwargs or fall back
+        model = kwargs["model"]
+        tok = kwargs.get("tokenizer") or tokenizer
+
+        if state.global_step % 20 == 0:
+            # generate some text with instructions in the same format as in dataset
+            # and log to wandb to see how the model performs during training
+            prompt = f"User:Write a thank you email{tok.eos_token}\nAssistant:" # this is a prompt structure, use same during inference
+            inputs = tok(prompt, return_tensors="pt").to(model.device)
+            tok.pad_token = tok.eos_token
+            try:
+                # Enable Beam Search to make early_stopping relevant
+                outputs = model.generate(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    max_length=256,
+                    num_return_sequences=1,
+                    num_beams=5,
+                    no_repeat_ngram_size=2,
+                    early_stopping=True,
+                    eos_token_id=tok.eos_token_id,
+                    repetition_penalty=1.2,  # Optional but works well
+                )
+                text = tok.decode(outputs[0], skip_special_tokens=False)
+                wandb.log({"sample_text": wandb.Html(f"<p>{text}</p>"), "step": state.global_step})
+            except Exception as e:
+                wandb.log({"sample_text": f"Error during generation: {str(e)}", "step": state.global_step})
+
+
+print(processed_no_robots_train[0]) ###
+# ---------------------------
+# Initialize the Trainer
+# ---------------------------
+trainer = SFTTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=processed_no_robots_train,
+    eval_dataset=processed_no_robots_eval,
+    tokenizer=tokenizer,
+    data_collator=custom_collate, #data_collator,
+    #compute_metrics=compute_metrics,
+)
 
 trainer.add_callback(GenerateTextCallback)
 
@@ -341,9 +448,18 @@ trainer.add_callback(GenerateTextCallback)
 # ---------------------------
 trainer.train()
 
-final_save_path = './gpt3-small-fineweb-sft'
+# ---------------------------
+# Save the Final Model and Tokenizer
+# ---------------------------
+final_save_path = 'gpt3-small-fineweb-no_robots'
 trainer.save_model(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"Final model saved to {final_save_path}")
 
+# ---------------------------
+# Finish the W&B Run
+# ---------------------------
 wandb.finish()
+gc.collect()
+import gc
+gc.collect()
