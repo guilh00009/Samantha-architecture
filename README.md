@@ -115,7 +115,7 @@ You can also download weights from HuggingFace:
 
 125 million parameters: https://huggingface.co/k050506koch/GPT3-dev-125m-1202 (more like an actual implementation, the most recent model)
 
-To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L310). This will work for both HuggingFace-based models of **same architecture** and locally-based ones. To download a remote-hosted model, type "k050506koch/GPT3-dev-125m-1202" into [model_path = ""](inference.py#L310).
+To use the model, you have to paste a path to the folder inside [model_path = ""](inference.py#L319). This will work for both HuggingFace-based models of **same architecture** and locally-based ones. To download a remote-hosted model, type "k050506koch/GPT3-dev-125m-1202" into [model_path = ""](inference.py#L319).
 
 #### Note: All these models are highly undertrained due to my computational budget. Some of them underwent 600,000 training steps with a batch size of 12 and a sequence length of 512, totaling approximately 3.7 billion tokens (512 * 12 * 600,000 = 3,686,400,000). (This is a very small amount for the model of this size. For example, OpenAI trained their GPT-3 model series on 300 Bn tokens.)
 
