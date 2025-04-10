@@ -107,7 +107,7 @@ The training script initializes the model, optimizer, and learning rate schedule
 
 ### Inference Script
 
-The inference script loads a pre-trained model and tokenizer, moves the model to the appropriate device, and generates text based on user input using the [`generate_text_stream`](inference.py#L246) function.
+The inference script loads a pre-trained model and tokenizer, moves the model to the appropriate device, and generates text based on user input using the [`generate_text_stream`](inference.py#L254) function.
 
 You can also download weights from HuggingFace:
 
