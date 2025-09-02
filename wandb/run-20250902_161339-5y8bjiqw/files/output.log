@@ -1,0 +1,64 @@
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:04<00:00, 6858.96it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 115.65it/s]
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:04<00:00, 6686.92it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 121.68it/s]
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:05<00:00, 4907.85it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 350/350 [00:03<00:00, 111.28it/s]
+Model size: 17,735,936 parameters
+Memory for parameters (BF16): 33.83 MB
+Estimated training memory: ~101.49 MB (params + grads + optimizer)
+Using device: cpu
+Traceback (most recent call last):
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 423, in <module>
+    outputs = model(**inputs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_dynamo\eval_frame.py", line 375, in __call__
+    return super().__call__(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\nn\modules\module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\nn\modules\module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_dynamo\eval_frame.py", line 749, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\compile_fx.py", line 923, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\compile_fx.py", line 907, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\compile_fx.py", line 1578, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\compile_fx.py", line 1456, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\graph.py", line 2293, in compile_to_module
+    return self._compile_to_module()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\graph.py", line 2299, in _compile_to_module
+    self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\graph.py", line 2238, in codegen
+    self.scheduler.codegen()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\scheduler.py", line 4598, in codegen
+    else self._codegen(self.nodes)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\scheduler.py", line 4750, in _codegen
+    self.get_backend(device).codegen_node(node)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\codegen\cpp.py", line 5076, in codegen_node
+    cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\codegen\cpp.py", line 3816, in __init__
+    self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 432, in pick_vec_isa
+    _valid_vec_isa_list: list[VecISA] = valid_vec_isa_list()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 419, in valid_vec_isa_list
+    isa_list.extend(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 419, in <genexpr>
+    isa_list.extend(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 147, in __bool__
+    return self.__bool__impl(config.cpp.vec_isa_ok)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 157, in __bool__impl
+    return self.check_build(VecISA._avx_code)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 102, in check_build
+    extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpu_vec_isa.py", line 28, in _get_isa_dry_compile_fingerprint
+    compiler_info = get_compiler_version_info(get_cpp_compiler())
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpp_builder.py", line 147, in get_cpp_compiler
+    check_compiler_exist_windows(compiler)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\_inductor\cpp_builder.py", line 138, in check_compiler_exist_windows
+    raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+torch._inductor.exc.InductorError: RuntimeError: Compiler: cl is not found.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
