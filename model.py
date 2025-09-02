@@ -11,8 +11,8 @@ from transformers.models.gpt2.modeling_gpt2 import (
     CausalLMOutputWithCrossAttentions,
 )
 
-class CustomGPT2Config(GPT2Config):
-    model_type = "custom_gpt2"
+class SamanthaConfig(GPT2Config):
+    model_type = "samantha"
 
     def __init__(self, use_pre_layernorm=True, **kwargs):
         super().__init__(**kwargs)
@@ -27,7 +27,7 @@ from transformers.models.gpt2.modeling_gpt2 import (
     CausalLMOutputWithCrossAttentions,
 )
 
-class CustomGPT2Attention(GPT2Attention):
+class SamanthaAttention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False):
         super().__init__(config, is_cross_attention)
         # Ensure biases are included
@@ -56,20 +56,20 @@ class CustomGPT2Attention(GPT2Attention):
             output_attentions=output_attentions,
         )
 
-class CustomGPT2MLP(GPT2MLP):
+class SamanthaMLP(GPT2MLP):
     def __init__(self, intermediate_size, config):
         super().__init__(intermediate_size, config)
         self.c_fc = nn.Linear(config.hidden_size, intermediate_size, bias=True)
         self.c_proj = nn.Linear(intermediate_size, config.hidden_size, bias=True)
         self.act = nn.GELU()  # Use standard GeLU
 
-class CustomGPT2Block(GPT2Block):
+class SamanthaBlock(GPT2Block):
     def __init__(self, config):
         super().__init__(config)
         self.use_pre_layernorm = config.use_pre_layernorm
         self.ln_1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
-        self.attn = CustomGPT2Attention(config)
-        self.mlp = CustomGPT2MLP(4 * config.hidden_size, config)
+        self.attn = SamanthaAttention(config)
+        self.mlp = SamanthaMLP(4 * config.hidden_size, config)
         self.ln_2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
     def forward(
@@ -137,22 +137,22 @@ class CustomGPT2Block(GPT2Block):
 
         return outputs  # hidden_states, present, (attentions)
 
-class CustomGPT2Model(GPT2Model):
+class SamanthaModel(GPT2Model):
     def __init__(self, config):
         super().__init__(config)
         self.wte = nn.Embedding(config.vocab_size, config.hidden_size)
         self.wpe = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.drop = nn.Dropout(config.embd_pdrop)
-        self.h = nn.ModuleList([CustomGPT2Block(config) for _ in range(config.num_hidden_layers)])
+        self.h = nn.ModuleList([SamanthaBlock(config) for _ in range(config.num_hidden_layers)])
         self.ln_f = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
         # Initialize weights
         self.post_init()
 
-class CustomGPT2LMHeadModel(GPT2LMHeadModel):
+class SamanthaLMHeadModel(GPT2LMHeadModel):
     def __init__(self, config):
         super().__init__(config)
-        self.transformer = CustomGPT2Model(config)
+        self.transformer = SamanthaModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights

@@ -14,14 +14,40 @@ from transformers import (
 from datasets import load_dataset, interleave_datasets
 import wandb
 from itertools import islice, cycle
+import argparse
 
-wandb.init(project='gpt3-small-fineweb', name='fineweb-training-600,000_v5')
+# RTX 3050 optimizations
+torch.set_default_dtype(torch.bfloat16)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+parser = argparse.ArgumentParser(description='Training script for 17M Samantha model optimized for RTX 3050.')
+parser.add_argument('--resume', action='store_true', help='Resume training from the last checkpoint.')
+args = parser.parse_args()
+
+# Initialize wandb only when not resuming (to avoid multiple initializations)
+if not args.resume:
+    run = wandb.init(project='samantha-17m', name='samantha-17m-rtx3050-training')
+    run_id = wandb.run.id
+    os.makedirs('./emergency_checkpoint_17m', exist_ok=True)
+    with open('./emergency_checkpoint_17m/run_id.txt', 'w') as f:
+        f.write(run_id)
+else:
+    if os.path.exists('./emergency_checkpoint_17m/run_id.txt'):
+        with open('./emergency_checkpoint_17m/run_id.txt', 'r') as f:
+            run_id = f.read().strip()
+        run = wandb.init(project='samantha-17m',
+                         id=run_id,
+                         resume="allow")
+        print(f"Resuming WandB run with id {run_id}")
+    else:
+        run = wandb.init(project='samantha-17m', name='samantha-17m-rtx3050-training')
 
 tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 tokenizer.pad_token = tokenizer.eos_token
 
 global block_size
-block_size = 512  # For testing purposes; set to 2048 for full training
+block_size = 256  # Reduced for RTX 3050 memory constraints; original was 512
 
 # List of dataset names
 dataset_names = [
@@ -94,9 +120,9 @@ class StreamDataset(IterableDataset):
                     'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
                 }
 
-# training dataset and dataloader
+# training dataset and dataloader (optimized for RTX 3050)
 train_dataset = StreamDataset(grouped_train_dataset)
-train_dataloader = DataLoader(train_dataset, batch_size=12)
+train_dataloader = DataLoader(train_dataset, batch_size=4, num_workers=0)  # Reduced batch size for 6GB VRAM
 
 # Create validation dataset by taking a finite sample from the training data
 def create_validation_dataset(train_dataset, num_batches):
@@ -113,17 +139,11 @@ def create_validation_dataset(train_dataset, num_batches):
 # Number of validation batches to sample
 num_validation_batches = 100
 
-# validation dataset
+# validation dataset (optimized for RTX 3050)
 validation_data = create_validation_dataset(train_dataset, num_validation_batches)
-validation_dataloader = DataLoader(validation_data, batch_size=12)
+validation_dataloader = DataLoader(validation_data, batch_size=4, num_workers=0)  # Reduced batch size for 6GB VRAM
 
-# model configuration
-class CustomGPT2Config(GPT2Config):
-    def __init__(self, use_pre_layernorm=True, **kwargs):
-        super().__init__(**kwargs)
-        self.use_pre_layernorm = use_pre_layernorm
-
-# Model with Pre-LayerNorm and Biases aka GPT-3
+# Model with Pre-LayerNorm and Biases aka GPT-3 (Samantha is based on GPT-2)
 from transformers.models.gpt2.modeling_gpt2 import (
     GPT2LMHeadModel,
     GPT2Model,
@@ -132,6 +152,11 @@ from transformers.models.gpt2.modeling_gpt2 import (
     GPT2MLP,
     CausalLMOutputWithCrossAttentions,
 )
+
+class CustomGPT2Config(GPT2Config):
+    def __init__(self, use_pre_layernorm=True, **kwargs):
+        super().__init__(**kwargs)
+        self.use_pre_layernorm = use_pre_layernorm
 
 class CustomGPT2Attention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False):
@@ -270,16 +295,16 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
-# Initialize Configuration
+# Configuration for 17M model (optimized for RTX 3050)
 config = CustomGPT2Config(
     vocab_size=tokenizer.vocab_size,
-    n_positions=1024,  # number of positions
-    n_ctx=1024,        # context size
-    n_embd=256,        # embedding dimension
-    n_layer=6,         # number of transformer blocks
-    n_head=4,          # number of attention heads
-    n_inner=1024,      # dimension of the feedforward layer
-    activation_function='gelu',  # Standard GeLU
+    n_positions=512,   # Reduced context length for memory efficiency
+    n_ctx=512,         # Reduced context length for memory efficiency
+    n_embd=256,        # Embedding dimension (optimized for 17M parameters)
+    n_layer=6,         # Number of transformer blocks
+    n_head=8,          # Number of attention heads
+    n_inner=1024,      # Feedforward dimension (4x n_embd)
+    activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
     attn_pdrop=0.0,
@@ -302,13 +327,17 @@ def custom_init_weights(module):
 
 model.apply(custom_init_weights)
 
-device = torch.device(
-    'cuda' if torch.cuda.is_available() else
-    'mps' if torch.backends.mps.is_available() else
-    'cpu'
-)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Model optimizations for RTX 3050
+model = torch.compile(model, mode='max-autotune')  # Compile for better performance
+
 # model size
-print(f"Model size: {sum(p.numel() for p in model.parameters())}")
+total_params = sum(p.numel() for p in model.parameters())
+print(f"Model size: {total_params:,} parameters")
+print(f"Memory for parameters (BF16): {total_params * 2 / 1024 / 1024:.2f} MB")
+print(f"Estimated training memory: ~{total_params * 2 * 3 / 1024 / 1024:.2f} MB (params + grads + optimizer)")
+print(f"Using device: {device}")
 model.to(device)
 
 # optimizer and learning rate scheduler
@@ -330,24 +359,37 @@ scheduler = get_cosine_schedule_with_warmup(
     num_training_steps=total_steps
 )
 
-gradient_accumulation_steps = 4 # need to try 16 # 1 runs very stable
-
+gradient_accumulation_steps = 8  # Increased to compensate for smaller batch size (4 -> effective batch of 32)
 
 ##################
-#512 tokens per batch * 12 batches = 6144 tokens per batch
-#6144 tokens per batch * 16 gradient accumulation steps = 98304 tokens per batch = +/- 100k tokens per batch
-#100k tokens per batch * 600k steps = 58,982,400,000 which is roughly 60 billion tokens
+# RTX 3050 Memory Optimization:
+# 256 tokens per batch * 4 batches = 1024 tokens per batch
+# 1024 tokens per batch * 8 gradient accumulation steps = 8192 tokens per batch
+# 8192 tokens per batch * 600k steps = ~4.9 billion tokens
 ##################
-
 
 max_grad_norm = 1.0
 
+# Resume training if --resume flag is used
+if args.resume:
+    checkpoint_dir = './emergency_checkpoint_17m'
+    if os.path.exists(checkpoint_dir):
+        print("Loading checkpoint from the emergency directory...")
+        model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'model_state.pt')))
+        optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'optimizer_state.pt')))
+        scheduler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scheduler_state.pt')))
+        with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'r') as f:
+            global_step = int(f.readline().strip())
+        print(f"Resumed training from step {global_step}")
+    else:
+        print("No checkpoint found. Starting from scratch.")
+
 # Training loop with gradient accumulation, gradient clipping, and perplexity computation
 model.train()
-logging_steps = 100  # Log metrics every logging_steps
-save_steps = 10000   # Save model every save_steps
-eval_steps = 5000    # Evaluate every eval_steps
-global_step = 0
+logging_steps = 50   # More frequent logging for single GPU monitoring
+save_steps = 5000    # Save more frequently for safety
+eval_steps = 1000    # Evaluate more frequently for monitoring
+emergency_save_steps = 100  # Save emergency checkpoint every 100 steps
 
 # Use cycle to create an infinite iterator over the dataloader
 train_iterator = cycle(train_dataloader)
@@ -373,6 +415,17 @@ try:
         scheduler.step()
 
         global_step += 1  # Increment global_step after each optimizer step
+
+        # Emergency save (every emergency_save_steps)
+        if global_step % emergency_save_steps == 0:
+            checkpoint_dir = './emergency_checkpoint_17m'
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+            torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
+            torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+            with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
+                f.write(f"{global_step}\n")
+            print(f"Temporary checkpoint saved at step {global_step}.")
 
         # Logging
         if global_step % logging_steps == 0:
@@ -417,7 +470,7 @@ try:
 
         # Saving the model
         if global_step > 0 and global_step % save_steps == 0:
-            save_path = f'./gpt3-small-fineweb-1M-step-{global_step}'
+            save_path = f'./samantha-17m-gpt2-rtx3050-step-{global_step}'
             model.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
             print(f"Model saved at step {global_step} to {save_path}")
@@ -426,12 +479,22 @@ try:
             break
 except KeyboardInterrupt:
     print("Training interrupted by user. Saving model...")
-    save_path = f'./gpt3-small-fineweb-1M-step-{global_step}'
+    save_path = f'./samantha-17m-gpt2-rtx3050-step-{global_step}'
     model.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
     print(f"Model saved at step {global_step} to {save_path}")
 
-final_save_path = './gpt3-small-fineweb-1M'
+    # Save emergency checkpoint
+    checkpoint_dir = './emergency_checkpoint_17m'
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+    torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
+    torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+    with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
+        f.write(f"{global_step}\n")
+    print(f"Emergency checkpoint saved at step {global_step}.")
+
+final_save_path = './samantha-17m-gpt2-rtx3050-final'
 model.save_pretrained(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"Final model saved to {final_save_path}")

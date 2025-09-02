@@ -14,8 +14,8 @@ torch.set_default_dtype(torch.bfloat16)
 tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 tokenizer.pad_token = tokenizer.eos_token
 
-class GPT3DevConfig(GPT2Config):
-    model_type = "gpt3dev"
+class SamanthaConfig(GPT2Config):
+    model_type = "samantha"
     
     def __init__(self, use_pre_layernorm=True, **kwargs):
         super().__init__(**kwargs)
@@ -26,7 +26,7 @@ from transformers.models.gpt2.modeling_gpt2 import (
     GPT2MLP,
 )
 
-class GPT3DevAttention(nn.Module):
+class SamanthaAttention(nn.Module):
     def __init__(self, config, is_cross_attention=False):
         super().__init__()
         self.is_cross_attention = is_cross_attention
@@ -82,20 +82,20 @@ class GPT3DevAttention(nn.Module):
         else:
             return (attn_output, attn_probs) if output_attentions else (attn_output,)
 
-class GPT3DevMLP(GPT2MLP):
+class SamanthaMLP(GPT2MLP):
     def __init__(self, intermediate_size, config):
         super().__init__(intermediate_size, config)
         self.c_fc = nn.Linear(config.n_embd, intermediate_size, bias=True)
         self.c_proj = nn.Linear(intermediate_size, config.n_embd, bias=True)
         self.act = nn.GELU()  # Use standard GeLU
 
-class GPT3DevBlock(nn.Module):
+class SamanthaBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.use_pre_layernorm = config.use_pre_layernorm
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.attn = GPT3DevAttention(config)
-        self.mlp = GPT3DevMLP(4 * config.n_embd, config)
+        self.attn = SamanthaAttention(config)
+        self.mlp = SamanthaMLP(4 * config.n_embd, config)
         self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
     def forward(
@@ -163,14 +163,14 @@ class GPT3DevBlock(nn.Module):
 
         return outputs  # hidden_states, present, (attentions)
 
-class GPT3DevModel(nn.Module):
+class SamanthaModel(nn.Module):
     def __init__(self, config):
         nn.Module.__init__(self)
         self.config = config
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
-        self.h = nn.ModuleList([GPT3DevBlock(config) for _ in range(config.n_layer)])
+        self.h = nn.ModuleList([SamanthaBlock(config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
     def forward(self, input_ids=None, past_key_values=None, attention_mask=None,
@@ -195,12 +195,12 @@ class GPT3DevModel(nn.Module):
         hidden_states = self.ln_f(hidden_states)
         return (hidden_states,)
 
-class GPT3DevLMHeadModel(PreTrainedModel):  # Changed inheritance from nn.Module to PreTrainedModel
-    config_class = GPT3DevConfig
+class SamanthaLMHeadModel(PreTrainedModel):  # Changed inheritance from nn.Module to PreTrainedModel
+    config_class = SamanthaConfig
 
     def __init__(self, config):
         super().__init__(config)  # This calls PreTrainedModel.__init__
-        self.transformer = GPT3DevModel(config)
+        self.transformer = SamanthaModel(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.post_init()  # Initializes weights and registers modules for pretrain saving
 
@@ -228,15 +228,15 @@ class GPT3DevLMHeadModel(PreTrainedModel):  # Changed inheritance from nn.Module
         return (lm_logits,) if loss is None else (loss, lm_logits)
 
 # d_head=n_embd/n_head and calculated automatically
-"""config = GPT3DevConfig(
+"""config = SamanthaConfig(
     vocab_size=tokenizer.vocab_size,
     n_positions=2048, # Max position embeddings
     n_ctx=2048,       # Max context length for generation
-    n_embd=5140,       # Embedding dimension
-    n_layer=40,       # Number of transformer blocks
-    n_head=40,        # Number of attention heads
-    n_inner=5140,     # Dimension of the feedforward layer
-    d_head=128,
+    n_embd=896,       # Embedding dimension for ~280M model
+    n_layer=24,       # Number of transformer blocks
+    n_head=14,        # Number of attention heads
+    n_inner=3584,     # Dimension of the feedforward layer (4x n_embd)
+    d_head=64,        # Attention head size (896 // 14 = 64)
     activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
@@ -244,15 +244,15 @@ class GPT3DevLMHeadModel(PreTrainedModel):  # Changed inheritance from nn.Module
     use_pre_layernorm=True,
 )"""
 
-config = GPT3DevConfig(
+config = SamanthaConfig(
     vocab_size=tokenizer.vocab_size,
     n_positions=2048,     # Maximum position embeddings
     n_ctx=2048,           # Maximum context length for generation
-    n_embd=12288,         # Embedding dimension set for 175B
-    n_layer=96,           # Number of transformer blocks
-    n_head=96,            # Number of attention heads
-    n_inner=12288,        # Feedforward dimension (kept equal to n_embd as in your 13B config)
-    d_head=128,           # Attention head size (to ensure 96 * 128 = 12288)
+    n_embd=1024,          # Embedding dimension for 350M model
+    n_layer=24,           # Number of transformer blocks
+    n_head=16,            # Number of attention heads
+    n_inner=4096,         # Feedforward dimension (4x n_embd)
+    d_head=64,            # Attention head size (1024 // 16 = 64)
     activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
@@ -261,15 +261,15 @@ config = GPT3DevConfig(
 )
 
 
-"""config = GPT3DevConfig(
+"""config = SamanthaConfig(
     vocab_size=tokenizer.vocab_size,
     n_positions=2048,  # Max position embeddings
     n_ctx=2048,        # Max context length for generation
-    n_embd=5120,       # Embedding dimension
-    n_layer=40,        # Number of transformer blocks
-    n_head=40,         # Number of attention heads
-    n_inner=5120,      # Dimension of the feedforward layer
-    d_head=128,
+    n_embd=768,        # Embedding dimension for ~125M model
+    n_layer=12,        # Number of transformer blocks
+    n_head=12,         # Number of attention heads
+    n_inner=3072,      # Dimension of the feedforward layer (4x n_embd)
+    d_head=64,         # Attention head size (768 // 12 = 64)
     activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
@@ -277,7 +277,7 @@ config = GPT3DevConfig(
     use_pre_layernorm=True,
 )"""
 
-model = GPT3DevLMHeadModel(config)
+model = SamanthaLMHeadModel(config)
 
 def custom_init_weights(module):
     if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -302,7 +302,7 @@ model.to(device)
 
 print(f"Training model with {sum(p.numel() for p in model.parameters())} parameters")
 
-final_save_path = '/Volumes/disk1/gpt3_arch_demonstrator_175B'
+final_save_path = '/Volumes/disk1/samantha_350M'
 model.save_pretrained(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"\nmodel saved to {final_save_path}")

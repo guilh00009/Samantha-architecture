@@ -18,16 +18,44 @@ import wandb
 from itertools import islice, cycle
 import evaluate
 from lion_pytorch import Lion
+import argparse
 
-import os
-
+# Multi-GPU and H100 optimizations
 os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"]="0.0"
-#os.environ["WANDB_OFFLINE"]="1" # if you want to run offline
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1"  # Use both H100 GPUs
+os.environ["NCCL_IB_DISABLE"]="1"  # Disable InfiniBand for stability
+os.environ["NCCL_SOCKET_IFNAME"]="eth0"  # Specify network interface
+
+# H100 specific optimizations
+torch.backends.cuda.matmul.allow_tf32 = True  # Allow TF32 on H100
+torch.backends.cudnn.allow_tf32 = True  # Allow TF32 for cuDNN
+
+#os.environ["WANDB_OFFLINE"]="1" # Uncomment if you want to run offline
+
+# ---------------------------
+# Parse command line arguments
+# ---------------------------
+parser = argparse.ArgumentParser(description='Fine-tune Samantha model with combined datasets')
+parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
+parser.add_argument('--world_size', type=int, default=1, help='World size for distributed training')
+parser.add_argument('--batch_size', type=int, default=4, help='Per-device batch size (reduced for 40GB H100)')
+parser.add_argument('--gradient_accumulation_steps', type=int, default=8, help='Gradient accumulation steps (increased for memory efficiency)')
+parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
+args = parser.parse_args()
+
+# Detect available GPUs
+num_gpus = torch.cuda.device_count()
+print(f"🔍 Detected {num_gpus} GPU(s)")
+for i in range(num_gpus):
+    gpu_name = torch.cuda.get_device_name(i)
+    gpu_memory = torch.cuda.get_device_properties(i).total_memory / 1024**3
+    print(f"   GPU {i}: {gpu_name} ({gpu_memory:.1f} GB VRAM)")
 
 # ---------------------------
 # Initialize Weights & Biases (W&B / Wandb)
 # ---------------------------
-wandb.init(project='gpt3-small-fineweb', name='sft-no_robots')
+run_name = f'sft-triple-h100-{num_gpus}gpu-bs{args.batch_size*args.gradient_accumulation_steps*num_gpus}'
+wandb.init(project='samantha-sft', name=run_name)
 
 # ---------------------------
 # Model Classes
@@ -244,34 +272,207 @@ tokenizer.pad_token = tokenizer.eos_token
 config = GPT2Config.from_pretrained('gpt3-small-fineweb')
 
 # Initialize the custom model with the loaded configuration
+# Load model
 model = CustomGPT2LMHeadModel.from_pretrained('gpt3-small-fineweb', config=config)
-print("Fine-tuning model with" , model.num_parameters(), "parameters")
-device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
-model.to(device)
+print(f"🎯 Fine-tuning model with {model.num_parameters():,} parameters")
+
+# Setup device for multi-GPU training
+if num_gpus > 1:
+    print(f"🚀 Using {num_gpus} GPUs for distributed training")
+    # Use HuggingFace's device mapping for multi-GPU
+    device = torch.device(f"cuda:{args.local_rank}" if args.local_rank != -1 else "cuda")
+    model.to(device)
+
+    # Enable gradient checkpointing for memory efficiency on H100
+    model.gradient_checkpointing_enable()
+
+    # Additional memory optimizations for 40GB H100
+    torch.cuda.empty_cache()  # Clear any existing cache
+
+    print(f"📊 Effective batch size: {args.batch_size * args.gradient_accumulation_steps * num_gpus}")
+    print(f"💾 Memory optimizations enabled for 40GB H100 GPUs")
+    print(f"   • Gradient checkpointing: Enabled")
+    print(f"   • TF32 precision: Enabled")
+    print(f"   • Memory pinning: Enabled")
+else:
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model.to(device)
+    print(f"🔸 Using single GPU: {device}")
 
 # ---------------------------
-# Load and Prepare the no_robots Dataset
+# Load and Prepare the Custom ShareGPT Dataset
 # ---------------------------
-no_robots_train_dataset = load_dataset("HuggingFaceH4/no_robots", split="train")
-no_robots_eval_dataset = load_dataset("HuggingFaceH4/no_robots", split="test")
+import json
 
-# Preprocess the dataset
-def preprocess_no_robots(sample, idx):
+# Load custom dataset
+def load_custom_dataset(file_path):
+    """Load the custom ShareGPT dataset from JSONL file"""
+    conversations = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                data = json.loads(line)
+                conversations.append(data)
+    return conversations
+
+# Convert custom format to standard format
+def convert_custom_format_to_messages(conversations_data):
+    """Convert custom ShareGPT format to standard messages format"""
+    formatted_data = []
+
+    for item in conversations_data:
+        messages = []
+        for conv in item["conversations"]:
+            role = "user" if conv["from"] == "human" else "assistant"
+            messages.append({
+                "role": role,
+                "content": conv["value"]
+            })
+
+        formatted_data.append({"messages": messages})
+
+    return formatted_data
+
+# Load and convert custom datasets
+custom_dataset_path_1 = "merged_dataset_project_human_sharegpt (2).jsonl"
+custom_dataset_path_2 = "train.jsonl"
+print(f"Loading custom datasets:")
+print(f"  1. {custom_dataset_path_1}")
+print(f"  2. {custom_dataset_path_2}")
+
+# Load all datasets
+all_train_datasets = []
+all_eval_datasets = []
+
+# Load first custom ShareGPT dataset
+try:
+    custom_conversations_1 = load_custom_dataset(custom_dataset_path_1)
+    custom_formatted_data_1 = convert_custom_format_to_messages(custom_conversations_1)
+
+    # Create dataset from formatted data
+    from datasets import Dataset
+    custom_dataset_1 = Dataset.from_list(custom_formatted_data_1)
+
+    # Split into train and eval (90/10 split)
+    custom_dataset_split_1 = custom_dataset_1.train_test_split(test_size=0.1, seed=42)
+    all_train_datasets.append(custom_dataset_split_1["train"])
+    all_eval_datasets.append(custom_dataset_split_1["test"])
+
+    print(f"✅ ShareGPT dataset loaded: {len(custom_dataset_split_1['train'])} training, {len(custom_dataset_split_1['test'])} eval samples")
+
+except FileNotFoundError:
+    print(f"❌ First custom dataset file not found: {custom_dataset_path_1}")
+    print("⚠️  Skipping first custom dataset")
+
+# Load second custom dataset (text revision tasks)
+try:
+    custom_conversations_2 = load_custom_dataset(custom_dataset_path_2)
+    custom_formatted_data_2 = convert_custom_format_to_messages(custom_conversations_2)
+
+    custom_dataset_2 = Dataset.from_list(custom_formatted_data_2)
+
+    # Split into train and eval (90/10 split)
+    custom_dataset_split_2 = custom_dataset_2.train_test_split(test_size=0.1, seed=42)
+    all_train_datasets.append(custom_dataset_split_2["train"])
+    all_eval_datasets.append(custom_dataset_split_2["test"])
+
+    print(f"✅ Text Revision dataset loaded: {len(custom_dataset_split_2['train'])} training, {len(custom_dataset_split_2['test'])} eval samples")
+
+except FileNotFoundError:
+    print(f"❌ Second custom dataset file not found: {custom_dataset_path_2}")
+    print("⚠️  Skipping second custom dataset")
+
+# Load no_robots dataset
+try:
+    no_robots_dataset = load_dataset("HuggingFaceH4/no_robots")
+    no_robots_split = no_robots_dataset.train_test_split(test_size=0.1, seed=42)
+    all_train_datasets.append(no_robots_split["train"])
+    all_eval_datasets.append(no_robots_split["test"])
+
+    print(f"✅ No Robots dataset loaded: {len(no_robots_split['train'])} training, {len(no_robots_split['test'])} eval samples")
+
+except Exception as e:
+    print(f"❌ Failed to load no_robots dataset: {e}")
+
+# Combine datasets if we have multiple
+if len(all_train_datasets) > 1:
+    from datasets import concatenate_datasets
+
+    print("🔄 Combining datasets...")
+    combined_train = concatenate_datasets(all_train_datasets)
+    combined_eval = concatenate_datasets(all_eval_datasets)
+
+    # Shuffle the combined dataset
+    combined_train = combined_train.shuffle(seed=42)
+    combined_eval = combined_eval.shuffle(seed=42)
+
+    train_dataset = combined_train
+    eval_dataset = combined_eval
+
+    dataset_names = []
+    if len(all_train_datasets) >= 1:
+        dataset_names.append("ShareGPT Conversations")
+    if len(all_train_datasets) >= 2:
+        dataset_names.append("Text Revision Tasks")
+    if len(all_train_datasets) >= 3:
+        dataset_names.append("No Robots Instructions")
+
+    print(f"✅ Combined dataset created:")
+    print(f"   Training samples: {len(train_dataset)}")
+    print(f"   Evaluation samples: {len(eval_dataset)}")
+    print(f"   Datasets combined: {' + '.join(dataset_names)}")
+
+elif len(all_train_datasets) == 1:
+    train_dataset = all_train_datasets[0]
+    eval_dataset = all_eval_datasets[0]
+
+    # Determine which dataset it is
+    if len(all_train_datasets) == 1:
+        if 'custom_dataset_split_1' in locals():
+            dataset_name = "ShareGPT Conversations"
+        elif 'custom_dataset_split_2' in locals():
+            dataset_name = "Text Revision Tasks"
+        else:
+            dataset_name = "No Robots Instructions"
+
+    print(f"✅ Using single dataset ({dataset_name}): {len(train_dataset)} training, {len(eval_dataset)} eval samples")
+
+else:
+    raise ValueError("❌ No datasets could be loaded!")
+
+# ---------------------------
+# Dataset processing is now handled above in the combined dataset section
+# ---------------------------
+
+# Preprocess datasets for SFT
+def preprocess_dataset(sample, idx):
     """
         Formats an example for SFT with dynamic sequence length.
-        First, tokenize the entire conversation without truncation, compute labels,
-        and then truncate the sequence to max_length.
+        Compatible with both custom and no_robots dataset formats.
     """
-    max_length = 1024  # can be 2048 for other dataaset but now it works fine
-    messages = sample["messages"]
+    max_length = 1024  # can be 2048 for other datasets but 1024 works fine
+
+    # Handle different message formats
+    if "messages" in sample:
+        messages = sample["messages"]
+    elif "conversations" in sample:
+        # Convert custom format to standard format
+        messages = []
+        for conv in sample["conversations"]:
+            role = "user" if conv["from"] == "human" else "assistant"
+            messages.append({"role": role, "content": conv["value"]})
+    else:
+        # Fallback for other formats
+        messages = [{"role": "user", "content": str(sample)}]
+
     conversation = ""
-    
+
     # Build the complete conversation first
     for msg in messages:
         role = msg["role"].capitalize()
         content = msg["content"]
         conversation += f"{role}: {content}{tokenizer.eos_token}\n"
-    
+
     if idx < 2:
         if len(messages) >= 2:
             user_message = messages[0]["content"]
@@ -323,17 +524,38 @@ def preprocess_no_robots(sample, idx):
     }
 
 # Apply preprocessing to the datasets
-processed_no_robots_train = no_robots_train_dataset.map(
-    preprocess_no_robots,
-    remove_columns=no_robots_train_dataset.column_names,
+print("🔄 Applying preprocessing to datasets...")
+
+processed_train = train_dataset.map(
+    preprocess_dataset,
+    remove_columns=train_dataset.column_names,
     with_indices=True,
 )
 
-processed_no_robots_eval = no_robots_eval_dataset.map(
-    preprocess_no_robots,
-    remove_columns=no_robots_eval_dataset.column_names,
+processed_eval = eval_dataset.map(
+    preprocess_dataset,
+    remove_columns=eval_dataset.column_names,
     with_indices=True,
 )
+
+print(f"✅ Preprocessing complete!")
+print(f"   Training samples: {len(processed_train)}")
+print(f"   Evaluation samples: {len(processed_eval)}")
+
+# Determine dataset composition for logging
+if len(all_train_datasets) > 1:
+    dataset_names = []
+    if len(all_train_datasets) >= 1:
+        dataset_names.append("ShareGPT")
+    if len(all_train_datasets) >= 2:
+        dataset_names.append("Text Revision")
+    if len(all_train_datasets) >= 3:
+        dataset_names.append("No Robots")
+    dataset_info = f"Combined ({' + '.join(dataset_names)})"
+else:
+    dataset_info = f"Single ({dataset_name})"
+
+print(f"   Dataset composition: {dataset_info}")
 
 # ---------------------------
 # Define the compute_metrics Function
@@ -362,11 +584,14 @@ training_args = SFTConfig(
     save_steps=200,
     overwrite_output_dir=True,
     num_train_epochs=3,#6                   # works fine with 3
-    per_device_train_batch_size=12,       # Adjust based on GPU memory
-    per_device_eval_batch_size=12,        # Adjust based on GPU memory
-    gradient_accumulation_steps=4,        # To simulate larger batch sizes
+    per_device_train_batch_size=args.batch_size,       # Conservative for 40GB H100
+    per_device_eval_batch_size=args.batch_size,        # Conservative for 40GB H100
+    gradient_accumulation_steps=args.gradient_accumulation_steps,        # Increased for memory efficiency
     eval_strategy="steps",
-    bf16=True,
+    bf16=True,                           # H100 optimized mixed precision
+    dataloader_pin_memory=True,          # Faster data transfer to GPU
+    dataloader_num_workers=4,            # Multi-worker data loading
+    dataloader_prefetch_factor=2,        # Prefetch optimization
     lr_scheduler_type="cosine", ###
     optim="adamw_hf", #adamw_torch
     remove_unused_columns=True,
@@ -375,11 +600,11 @@ training_args = SFTConfig(
     eval_steps=50,                      # Evaluate every 500 steps
     #save_steps=200,                     # Save model every 1000 steps
     logging_steps=1,                   # Log metrics every 100 steps
-    learning_rate=1e-4, #3e-5                 # Lower learning rate for fine-tuning
-    warmup_steps=200,                    #500# Warmup steps for scheduler
+    learning_rate=args.learning_rate,                 # H100 optimized learning rate
+    warmup_steps=200,                    # Warmup steps for scheduler
     save_total_limit=3,                  # Limit the total number of saved models
     report_to=['wandb'],                 # Enable logging to W&B
-    run_name='sft-training-no_robots',
+    run_name=run_name,  # Dynamic run name based on hardware
     load_best_model_at_end=True,         # Load the best model when finished training
     metric_for_best_model='eval_loss',   # eval_perplexity
     greater_is_better=False,             # Lower perplexity is better
@@ -427,15 +652,16 @@ class GenerateTextCallback(TrainerCallback):
                 wandb.log({"sample_text": f"Error during generation: {str(e)}", "step": state.global_step})
 
 
-print(processed_no_robots_train[0]) ###
+print("Sample processed training example:")
+print(processed_train[0])
 # ---------------------------
 # Initialize the Trainer
 # ---------------------------
 trainer = SFTTrainer(
     model=model,
     args=training_args,
-    train_dataset=processed_no_robots_train,
-    eval_dataset=processed_no_robots_eval,
+    train_dataset=processed_train,
+    eval_dataset=processed_eval,
     tokenizer=tokenizer,
     data_collator=custom_collate, #data_collator,
     #compute_metrics=compute_metrics,
@@ -451,7 +677,7 @@ trainer.train()
 # ---------------------------
 # Save the Final Model and Tokenizer
 # ---------------------------
-final_save_path = 'gpt3-small-fineweb-no_robots'
+final_save_path = f'samantha-sft-h100-{num_gpus}gpu-triple'
 trainer.save_model(final_save_path)
 tokenizer.save_pretrained(final_save_path)
 print(f"Final model saved to {final_save_path}")
