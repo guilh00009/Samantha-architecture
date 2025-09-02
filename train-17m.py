@@ -16,10 +16,16 @@ import wandb
 from itertools import islice, cycle
 import argparse
 
-# RTX 3050 optimizations
+# RTX 3050 optimizations with memory constraints
 torch.set_default_dtype(torch.bfloat16)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+
+# Minimize HuggingFace caching to save storage
+import os
+os.environ['HF_DATASETS_CACHE'] = './hf_cache_minimal'  # Small local cache only
+os.environ['HF_DATASETS_OFFLINE'] = '0'  # Allow downloads but minimize cache
+os.environ['TRANSFORMERS_CACHE'] = './hf_cache_minimal'
 
 parser = argparse.ArgumentParser(description='Training script for 17M Samantha model optimized for RTX 3050.')
 parser.add_argument('--resume', action='store_true', help='Resume training from the last checkpoint.')
@@ -68,27 +74,36 @@ def load_datasets(dataset_names, split, streaming=True):
         datasets_list.append(dataset)
     return datasets_list
 
-# Load datasets
+# Load datasets with true streaming (no caching)
 training_datasets = load_datasets(dataset_names, split="train", streaming=True)
 training_dataset = interleave_datasets(training_datasets)
 
-def tokenize_function(example):
-    return tokenizer(example['text'], truncation=True, max_length=block_size)
+# Function to tokenize on-the-fly (no .map() caching)
+def tokenize_and_chunk_stream(dataset_iter, chunk_size=10):  # Reduced chunk size for memory
+    """Process data in small chunks to minimize memory usage"""
+    buffer = []
 
-tokenized_train_dataset = training_dataset.map(
-    tokenize_function,
-    remove_columns=training_dataset.column_names,
-)
+    for example in dataset_iter:
+        # Tokenize example
+        tokenized = tokenizer(example['text'], truncation=True, max_length=block_size,
+                            return_tensors='pt', padding=False)
 
-# Function to chunk data into batches
-def chunked_iterator(iterable, chunk_size):
-    iterator = iter(iterable)
-    for first in iterator:
-        chunk = [first] + list(islice(iterator, chunk_size - 1))
-        yield {
-            key: [example[key] for example in chunk]
-            for key in chunk[0].keys()
+        # Convert to dict format expected by the rest of the pipeline
+        example_dict = {
+            'input_ids': tokenized['input_ids'].squeeze().tolist(),
+            'attention_mask': tokenized['attention_mask'].squeeze().tolist()
         }
+
+        buffer.append(example_dict)
+
+        # Yield when buffer is full
+        if len(buffer) >= chunk_size:
+            yield buffer
+            buffer = []
+
+    # Yield remaining items
+    if buffer:
+        yield buffer
 
 # group texts into blocks
 def group_texts(examples):
@@ -102,10 +117,9 @@ def group_texts(examples):
     result['labels'] = result['input_ids'].copy()
     return result
 
-# Create an iterable that yields grouped texts for training
-grouped_train_dataset = (
-    group_texts(batch) for batch in chunked_iterator(tokenized_train_dataset, chunk_size=1000)
-)
+# Create streaming iterator
+stream_iter = tokenize_and_chunk_stream(training_dataset, chunk_size=10)
+grouped_train_dataset = (group_texts(batch) for batch in stream_iter)
 
 # Define a custom IterableDataset
 class StreamDataset(IterableDataset):
@@ -120,9 +134,9 @@ class StreamDataset(IterableDataset):
                     'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
                 }
 
-# training dataset and dataloader (optimized for RTX 3050)
+# training dataset and dataloader (optimized for RTX 3050 with storage constraints)
 train_dataset = StreamDataset(grouped_train_dataset)
-train_dataloader = DataLoader(train_dataset, batch_size=4, num_workers=0)  # Reduced batch size for 6GB VRAM
+train_dataloader = DataLoader(train_dataset, batch_size=2, num_workers=0)  # Further reduced for memory
 
 # Create validation dataset by taking a finite sample from the training data
 def create_validation_dataset(train_dataset, num_batches):
@@ -386,10 +400,10 @@ if args.resume:
 
 # Training loop with gradient accumulation, gradient clipping, and perplexity computation
 model.train()
-logging_steps = 50   # More frequent logging for single GPU monitoring
-save_steps = 5000    # Save more frequently for safety
-eval_steps = 1000    # Evaluate more frequently for monitoring
-emergency_save_steps = 100  # Save emergency checkpoint every 100 steps
+logging_steps = 100   # Reduced logging frequency to save resources
+save_steps = 10000    # Reduced checkpoint frequency to save storage
+eval_steps = 2000     # Reduced evaluation frequency
+emergency_save_steps = 500  # Reduced emergency checkpoint frequency
 
 # Use cycle to create an infinite iterator over the dataloader
 train_iterator = cycle(train_dataloader)
@@ -474,6 +488,13 @@ try:
             model.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
             print(f"Model saved at step {global_step} to {save_path}")
+
+            # Auto-cleanup old checkpoints to save storage
+            try:
+                import subprocess
+                subprocess.run(['python', 'cleanup_checkpoints.py'], capture_output=True)
+            except:
+                pass  # Silently continue if cleanup fails
 
         if global_step >= total_steps:
             break

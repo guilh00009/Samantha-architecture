@@ -1,0 +1,80 @@
+tokenizer_config.json: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 26.0/26.0 [00:00<?, ?B/s]
+C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py:143: UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them in C:\Users\kelle\.cache\huggingface\hub\models--gpt2. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable. For more details, see https://huggingface.co/docs/huggingface_hub/how-to-cache#limitations.
+To support symlinks on Windows, you either need to activate Developer Mode or to run Python as an administrator. In order to activate developer mode, see this article: https://docs.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development
+  warnings.warn(message)
+vocab.json: 100%|███████████████████████████████████████████████████████████████████████████████████████████| 1.04M/1.04M [00:00<00:00, 3.75MB/s]
+merges.txt: 100%|█████████████████████████████████████████████████████████████████████████████████████████████| 456k/456k [00:00<00:00, 3.92MB/s]
+tokenizer.json: 100%|███████████████████████████████████████████████████████████████████████████████████████| 1.36M/1.36M [00:00<00:00, 2.99MB/s]
+config.json: 100%|███████████████████████████████████████████████████████████████████████████████████████████████| 665/665 [00:00<00:00, 665kB/s]
+README.md: 44.3kB [00:00, 27.6MB/s]
+C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py:143: UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them in C:\Users\kelle\.cache\huggingface\hub\datasets--HuggingFaceFW--fineweb. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable. For more details, see https://huggingface.co/docs/huggingface_hub/how-to-cache#limitations.
+To support symlinks on Windows, you either need to activate Developer Mode or to run Python as an administrator. In order to activate developer mode, see this article: https://docs.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development
+  warnings.warn(message)
+Traceback (most recent call last):
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\utils\_http.py", line 409, in hf_raise_for_status
+    response.raise_for_status()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\requests\models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: https://huggingface.co/datasets/HuggingFaceFW/fineweb/resolve/9bb295ddab0e05d785b879661af7260fed5140fc/fineweb.py
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\load.py", line 982, in dataset_module_factory
+    api.hf_hub_download(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\hf_api.py", line 5528, in hf_hub_download
+    return hf_hub_download(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 1010, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 1073, in _hf_hub_download_to_cache_dir
+    (url_to_download, etag, commit_hash, expected_size, xet_file_data, head_call_error) = _get_metadata_or_catch_error(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 1546, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 1463, in get_hf_file_metadata
+    r = _request_wrapper(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 286, in _request_wrapper
+    response = _request_wrapper(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\file_download.py", line 310, in _request_wrapper
+    hf_raise_for_status(response)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\huggingface_hub\utils\_http.py", line 420, in hf_raise_for_status
+    raise _format(EntryNotFoundError, message, response) from e
+huggingface_hub.errors.EntryNotFoundError: 404 Client Error. (Request ID: Root=1-68b73fbe-782b0ec6340a044b3e0872b4;1e41a04d-b161-426e-a72d-c3c14932b153)
+
+Entry Not Found for url: https://huggingface.co/datasets/HuggingFaceFW/fineweb/resolve/9bb295ddab0e05d785b879661af7260fed5140fc/fineweb.py.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 72, in <module>
+    training_datasets = load_datasets(dataset_names, split="train", streaming=True)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 62, in load_datasets
+    dataset = load_dataset(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\load.py", line 1392, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\load.py", line 1132, in load_dataset_builder
+    dataset_module = dataset_module_factory(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\load.py", line 1004, in dataset_module_factory
+    ).get_module()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\load.py", line 632, in get_module
+    data_files = DataFilesDict.from_patterns(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\data_files.py", line 689, in from_patterns
+    else DataFilesList.from_patterns(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\data_files.py", line 582, in from_patterns
+    resolve_pattern(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\data_files.py", line 367, in resolve_pattern
+    out = [
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\data_files.py", line 370, in <listcomp>
+    if any("." + suffix in allowed_extensions for suffix in xbasename(filepath).split(".")[1:])
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\utils\file_utils.py", line 651, in xbasename
+    if is_local_path(a):
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\datasets\utils\file_utils.py", line 72, in is_local_path
+    return urlparse(url_or_filename).scheme == "" or os.path.ismount(urlparse(url_or_filename).scheme + ":/")
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\ntpath.py", line 301, in ismount
+    return path.rstrip(seps) == _getvolumepathname(path).rstrip(seps)
+KeyboardInterrupt
