@@ -1,0 +1,32 @@
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_setup.py:_flush():81] Current SDK version is 0.21.3
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_setup.py:_flush():81] Configure stats pid to 14232
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_setup.py:_flush():81] Loading settings from C:\Users\kelle\.config\wandb\settings
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_setup.py:_flush():81] Loading settings from C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\settings
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_init.py:setup_run_log_directory():686] Logging user logs to C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\run-20250902_165834-ou85n78t\logs\debug.log
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_init.py:setup_run_log_directory():687] Logging internal logs to C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\run-20250902_165834-ou85n78t\logs\debug-internal.log
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_init.py:init():813] calling init triggers
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_init.py:init():818] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2025-09-02 16:58:34,994 INFO    MainThread:14232 [wandb_init.py:init():854] starting backend
+2025-09-02 16:58:37,258 WARNING MainThread:14232 [wandb_init.py:init():1571] [no run ID] interrupted
+Traceback (most recent call last):
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\wandb_init.py", line 1562, in init
+    run = wi.init(run_settings, run_config, run_printer)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\wandb_init.py", line 856, in init
+    service = self._wl.ensure_service()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\wandb_setup.py", line 401, in ensure_service
+    self._connection = service_connection.connect_to_service(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\service\service_connection.py", line 36, in connect_to_service
+    return _start_and_connect_service(asyncer, settings)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\service\service_connection.py", line 51, in _start_and_connect_service
+    client = proc.token.connect(asyncer=asyncer)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\service\service_token.py", line 151, in connect
+    reader, writer = asyncer.run(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\asyncio_manager.py", line 136, in run
+    return future.result()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\concurrent\futures\_base.py", line 453, in result
+    self._condition.wait(timeout)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\threading.py", line 320, in wait
+    waiter.acquire()
+KeyboardInterrupt

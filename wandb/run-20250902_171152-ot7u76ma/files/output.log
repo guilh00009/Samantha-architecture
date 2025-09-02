@@ -1,0 +1,16 @@
+Resolving data files: 100%|█████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:02<00:00, 11281.81it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 113.63it/s]
+Resolving data files: 100%|█████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:02<00:00, 12391.51it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 142.58it/s]
+Resolving data files: 100%|█████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:02<00:00, 11498.90it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 350/350 [00:02<00:00, 170.45it/s]
+Using regular model without torch.compile optimization
+Model size: 17,735,936 parameters
+Memory for parameters (BF16): 33.83 MB
+Estimated training memory: ~101.49 MB (params + grads + optimizer)
+Using device: cuda
+CUDA device: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Traceback (most recent call last):
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 601, in <module>
+    global_step += 1  # Increment global_step after each optimizer step
+NameError: name 'global_step' is not defined

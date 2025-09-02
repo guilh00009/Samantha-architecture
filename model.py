@@ -45,16 +45,23 @@ class CustomGPT2Attention(GPT2Attention):
         use_cache=False,
         output_attentions=False,
     ):
-        return super().forward(
-            hidden_states,
-            layer_past=layer_past,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
-            encoder_hidden_states=encoder_hidden_states,      # Pass this parameter
-            encoder_attention_mask=encoder_attention_mask,    # Pass this parameter
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-        )
+        # Prepare arguments for parent forward call
+        forward_kwargs = {
+            'hidden_states': hidden_states,
+            'layer_past': layer_past,
+            'attention_mask': attention_mask,
+            'head_mask': head_mask,
+            'use_cache': use_cache,
+            'output_attentions': output_attentions,
+        }
+
+        # Only add encoder parameters if they are not None
+        if encoder_hidden_states is not None:
+            forward_kwargs['encoder_hidden_states'] = encoder_hidden_states
+        if encoder_attention_mask is not None:
+            forward_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+        return super().forward(**forward_kwargs)
 
 class CustomGPT2MLP(GPT2MLP):
     def __init__(self, intermediate_size, config):
@@ -87,16 +94,24 @@ class CustomGPT2Block(GPT2Block):
             # Pre-LayerNorm
             residual = hidden_states
             hidden_states = self.ln_1(hidden_states)
-            attn_outputs = self.attn(
-                hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,      # Pass this parameter
-                encoder_attention_mask=encoder_attention_mask,    # Pass this parameter
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
+
+            # Prepare attention arguments
+            attn_kwargs = {
+                'hidden_states': hidden_states,
+                'layer_past': layer_past,
+                'attention_mask': attention_mask,
+                'head_mask': head_mask,
+                'use_cache': use_cache,
+                'output_attentions': output_attentions,
+            }
+
+            # Only add encoder parameters if they are not None
+            if encoder_hidden_states is not None:
+                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
+            if encoder_attention_mask is not None:
+                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+            attn_outputs = self.attn(**attn_kwargs)
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 
@@ -109,16 +124,24 @@ class CustomGPT2Block(GPT2Block):
         else:
             # Original GPT-2 Post-LayerNorm
             residual = hidden_states
-            attn_outputs = self.attn(
-                hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,      # Pass this parameter
-                encoder_attention_mask=encoder_attention_mask,    # Pass this parameter
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
+
+            # Prepare attention arguments
+            attn_kwargs = {
+                'hidden_states': hidden_states,
+                'layer_past': layer_past,
+                'attention_mask': attention_mask,
+                'head_mask': head_mask,
+                'use_cache': use_cache,
+                'output_attentions': output_attentions,
+            }
+
+            # Only add encoder parameters if they are not None
+            if encoder_hidden_states is not None:
+                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
+            if encoder_attention_mask is not None:
+                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+            attn_outputs = self.attn(**attn_kwargs)
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 

@@ -1,0 +1,11 @@
+{"time":"2025-09-02T16:35:27.1703638-03:00","level":"INFO","msg":"stream: starting","core version":"0.21.3"}
+{"time":"2025-09-02T16:35:27.7089229-03:00","level":"INFO","msg":"stream: created new stream","id":"pafbnysq"}
+{"time":"2025-09-02T16:35:27.7089229-03:00","level":"INFO","msg":"stream: started","id":"pafbnysq"}
+{"time":"2025-09-02T16:35:27.7089229-03:00","level":"INFO","msg":"handler: started","stream_id":"pafbnysq"}
+{"time":"2025-09-02T16:35:27.7094587-03:00","level":"INFO","msg":"writer: started","stream_id":"pafbnysq"}
+{"time":"2025-09-02T16:35:27.7094587-03:00","level":"INFO","msg":"sender: started","stream_id":"pafbnysq"}
+{"time":"2025-09-02T16:38:06.732979-03:00","level":"INFO","msg":"stream: closing","id":"pafbnysq"}
+{"time":"2025-09-02T16:38:07.3037877-03:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-09-02T16:38:07.791307-03:00","level":"INFO","msg":"handler: closed","stream_id":"pafbnysq"}
+{"time":"2025-09-02T16:38:07.791307-03:00","level":"INFO","msg":"sender: closed","stream_id":"pafbnysq"}
+{"time":"2025-09-02T16:38:07.791307-03:00","level":"INFO","msg":"stream: closed","id":"pafbnysq"}

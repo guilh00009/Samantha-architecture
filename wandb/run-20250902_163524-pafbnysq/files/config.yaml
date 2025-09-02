@@ -1,0 +1,60 @@
+_wandb:
+    value:
+        cli_version: 0.21.3
+        e:
+            vcefh0jww94rt921o6vgk8ajejhnm7gf:
+                codePath: train-17m.py
+                codePathLocal: train-17m.py
+                cpu_count: 10
+                cpu_count_logical: 16
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "487789162496"
+                        used: "459252342784"
+                email: kellerguilherme15@gmail.com
+                executable: C:\Users\kelle\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\python.exe
+                git:
+                    commit: 7e46760c774d3310e3ca6bd29ae8a336c3403a1f
+                    remote: https://github.com/guilh00009/Samantha-architecture.git
+                gpu: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 2560
+                      memoryTotal: "6442450944"
+                      name: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+                      uuid: GPU-5235fe42-62c3-e661-2ac3-945cd121d637
+                host: Guilherme
+                memory:
+                    total: "16849256448"
+                os: Windows-10-10.0.26100-SP0
+                program: C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py
+                python: CPython 3.10.11
+                root: C:\Users\kelle\Documents\GitHub\Samantha-architecture
+                startedAt: "2025-09-02T19:35:24.640115Z"
+                writerId: vcefh0jww94rt921o6vgk8ajejhnm7gf
+        m: []
+        python_version: 3.10.11
+        t:
+            "1":
+                - 1
+                - 11
+                - 49
+                - 51
+            "2":
+                - 1
+                - 11
+                - 41
+                - 49
+                - 51
+                - 71
+            "3":
+                - 13
+            "4": 3.10.11
+            "5": 0.21.3
+            "6": 4.56.0
+            "8":
+                - 3
+            "12": 0.21.3
+            "13": windows-amd64

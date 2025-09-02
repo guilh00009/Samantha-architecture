@@ -1,0 +1,34 @@
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_setup.py:_flush():81] Current SDK version is 0.21.3
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_setup.py:_flush():81] Configure stats pid to 31564
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_setup.py:_flush():81] Loading settings from C:\Users\kelle\.config\wandb\settings
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_setup.py:_flush():81] Loading settings from C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\settings
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2025-09-02 17:08:30,362 INFO    MainThread:31564 [wandb_init.py:setup_run_log_directory():686] Logging user logs to C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\run-20250902_170830-bj8lzsq0\logs\debug.log
+2025-09-02 17:08:30,363 INFO    MainThread:31564 [wandb_init.py:setup_run_log_directory():687] Logging internal logs to C:\Users\kelle\Documents\GitHub\Samantha-architecture\wandb\run-20250902_170830-bj8lzsq0\logs\debug-internal.log
+2025-09-02 17:08:30,363 INFO    MainThread:31564 [wandb_init.py:init():813] calling init triggers
+2025-09-02 17:08:30,363 INFO    MainThread:31564 [wandb_init.py:init():818] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2025-09-02 17:08:30,363 INFO    MainThread:31564 [wandb_init.py:init():854] starting backend
+2025-09-02 17:08:32,627 INFO    MainThread:31564 [wandb_init.py:init():857] sending inform_init request
+2025-09-02 17:08:32,639 INFO    MainThread:31564 [wandb_init.py:init():865] backend started and connected
+2025-09-02 17:08:32,640 INFO    MainThread:31564 [wandb_init.py:init():936] updated telemetry
+2025-09-02 17:08:32,673 INFO    MainThread:31564 [wandb_init.py:init():960] communicating run to backend with 90.0 second timeout
+2025-09-02 17:08:33,216 INFO    MainThread:31564 [wandb_init.py:init():1011] starting run threads in backend
+2025-09-02 17:08:33,288 INFO    MainThread:31564 [wandb_run.py:_console_start():2494] atexit reg
+2025-09-02 17:08:33,288 INFO    MainThread:31564 [wandb_run.py:_redirect():2342] redirect: wrap_raw
+2025-09-02 17:08:33,288 INFO    MainThread:31564 [wandb_run.py:_redirect():2411] Wrapping output streams.
+2025-09-02 17:08:33,288 INFO    MainThread:31564 [wandb_run.py:_redirect():2434] Redirects installed.
+2025-09-02 17:08:33,291 INFO    MainThread:31564 [wandb_init.py:init():1057] run started, returning control to user process
+2025-09-02 17:10:44,467 INFO    wandb-AsyncioManager-main:31564 [service_client.py:_forward_responses():84] Reached EOF.
+2025-09-02 17:10:44,467 INFO    wandb-AsyncioManager-main:31564 [mailbox.py:close():137] Closing mailbox, abandoning 1 handles.
+2025-09-02 17:10:46,741 ERROR   wandb-AsyncioManager-main:31564 [asyncio_manager.py:fn_wrap_exceptions():183] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\asyncio_manager.py", line 181, in fn_wrap_exceptions
+    await fn()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\wandb\sdk\lib\service\service_client.py", line 65, in _send_server_request
+    await self._writer.drain()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\asyncio\streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\asyncio\streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
