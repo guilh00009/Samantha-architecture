@@ -1,0 +1,18 @@
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:03<00:00, 8862.53it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 122.57it/s]
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:05<00:00, 4850.53it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 126.01it/s]
+Resolving data files: 100%|█████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:02<00:00, 11200.84it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 350/350 [00:02<00:00, 135.02it/s]
+Traceback (most recent call last):
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 157, in <module>
+    validation_data = create_validation_dataset(train_dataset, num_validation_batches)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 147, in create_validation_dataset
+    data = next(train_iter)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 130, in __iter__
+    for batch in self.grouped_dataset:
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 122, in <genexpr>
+    grouped_train_dataset = (group_texts(batch) for batch in stream_iter)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 110, in group_texts
+    concatenated = {k: sum(examples[k], []) for k in examples.keys()}
+AttributeError: 'list' object has no attribute 'keys'

@@ -81,29 +81,33 @@ training_dataset = interleave_datasets(training_datasets)
 # Function to tokenize on-the-fly (no .map() caching)
 def tokenize_and_chunk_stream(dataset_iter, chunk_size=10):  # Reduced chunk size for memory
     """Process data in small chunks to minimize memory usage"""
-    buffer = []
+    buffer_input_ids = []
+    buffer_attention_mask = []
 
     for example in dataset_iter:
         # Tokenize example
         tokenized = tokenizer(example['text'], truncation=True, max_length=block_size,
                             return_tensors='pt', padding=False)
 
-        # Convert to dict format expected by the rest of the pipeline
-        example_dict = {
-            'input_ids': tokenized['input_ids'].squeeze().tolist(),
-            'attention_mask': tokenized['attention_mask'].squeeze().tolist()
-        }
-
-        buffer.append(example_dict)
+        # Add to buffers
+        buffer_input_ids.append(tokenized['input_ids'].squeeze().tolist())
+        buffer_attention_mask.append(tokenized['attention_mask'].squeeze().tolist())
 
         # Yield when buffer is full
-        if len(buffer) >= chunk_size:
-            yield buffer
-            buffer = []
+        if len(buffer_input_ids) >= chunk_size:
+            yield {
+                'input_ids': buffer_input_ids,
+                'attention_mask': buffer_attention_mask
+            }
+            buffer_input_ids = []
+            buffer_attention_mask = []
 
     # Yield remaining items
-    if buffer:
-        yield buffer
+    if buffer_input_ids:
+        yield {
+            'input_ids': buffer_input_ids,
+            'attention_mask': buffer_attention_mask
+        }
 
 # group texts into blocks
 def group_texts(examples):
