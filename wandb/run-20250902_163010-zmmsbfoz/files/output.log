@@ -1,0 +1,15 @@
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:05<00:00, 5240.10it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 117.02it/s]
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:03<00:00, 7436.98it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 103.53it/s]
+Resolving data files: 100%|██████████████████████████████████████████████████████████████████████████████| 27468/27468 [00:03<00:00, 7045.23it/s]
+Resolving data files: 100%|███████████████████████████████████████████████████████████████████████████████████| 350/350 [00:02<00:00, 126.13it/s]
+Model compiled successfully with torch.compile
+Model size: 17,735,936 parameters
+Memory for parameters (BF16): 33.83 MB
+Estimated training memory: ~101.49 MB (params + grads + optimizer)
+Using device: cuda
+Traceback (most recent call last):
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-17m.py", line 367, in <module>
+    s
+NameError: name 's' is not defined

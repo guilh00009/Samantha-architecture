@@ -364,7 +364,7 @@ print(f"Model size: {total_params:,} parameters")
 print(f"Memory for parameters (BF16): {total_params * 2 / 1024 / 1024:.2f} MB")
 print(f"Estimated training memory: ~{total_params * 2 * 3 / 1024 / 1024:.2f} MB (params + grads + optimizer)")
 print(f"Using device: {device}")
-s
+
 # Force CUDA if available, otherwise CPU
 if torch.cuda.is_available():
     device = torch.device('cuda')
