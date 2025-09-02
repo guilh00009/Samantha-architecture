@@ -316,12 +316,12 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
 # Configuration for 17M model (optimized for RTX 3050)
 config = CustomGPT2Config(
     vocab_size=tokenizer.vocab_size,
-    n_positions=512,   # Reduced context length for memory efficiency
-    n_ctx=512,         # Reduced context length for memory efficiency
-    n_embd=256,        # Embedding dimension (optimized for 17M parameters)
-    n_layer=6,         # Number of transformer blocks
-    n_head=8,          # Number of attention heads
-    n_inner=1024,      # Feedforward dimension (4x n_embd)
+    max_position_embeddings=512,   # Reduced context length for memory efficiency
+    n_ctx=512,                     # Reduced context length for memory efficiency
+    hidden_size=256,               # Embedding dimension (optimized for 17M parameters)
+    num_hidden_layers=6,           # Number of transformer blocks
+    num_attention_heads=8,         # Number of attention heads
+    intermediate_size=1024,        # Feedforward dimension (4x hidden_size)
     activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
@@ -341,14 +341,22 @@ def custom_init_weights(module):
             module.bias.data.zero_()
     if isinstance(module, nn.Linear) and hasattr(module, 'weight'):
         # Apply scaling to residual projections
-        module.weight.data.mul_(1 / math.sqrt(2 * config.n_layer))
+        module.weight.data.mul_(1 / math.sqrt(2 * config.num_hidden_layers))
 
 model.apply(custom_init_weights)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Model optimizations for RTX 3050
-model = torch.compile(model, mode='max-autotune')  # Compile for better performance
+# Disable torch.compile on Windows to avoid C++ compiler issues
+if torch.cuda.is_available():
+    try:
+        model = torch.compile(model, mode='max-autotune')  # Compile for better performance
+        print("Model compiled successfully with torch.compile")
+    except Exception as e:
+        print(f"torch.compile failed: {e}. Using regular model.")
+else:
+    print("CUDA not available, skipping torch.compile")
 
 # model size
 total_params = sum(p.numel() for p in model.parameters())
@@ -356,7 +364,16 @@ print(f"Model size: {total_params:,} parameters")
 print(f"Memory for parameters (BF16): {total_params * 2 / 1024 / 1024:.2f} MB")
 print(f"Estimated training memory: ~{total_params * 2 * 3 / 1024 / 1024:.2f} MB (params + grads + optimizer)")
 print(f"Using device: {device}")
-model.to(device)
+s
+# Force CUDA if available, otherwise CPU
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    print(f"CUDA device: {torch.cuda.get_device_name()}")
+    model.to(device)
+else:
+    device = torch.device('cpu')
+    print("CUDA not available, using CPU")
+    model.to(device)
 
 # optimizer and learning rate scheduler
 total_steps = 600000  # desired total training steps

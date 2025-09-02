@@ -140,163 +140,24 @@ class CustomGPT2Config(GPT2Config):
         super().__init__(**kwargs)
         self.use_pre_layernorm = use_pre_layernorm
 
-# Custom GPT-2 with Pre-LayerNorm and Biases aka GPT-3
-from transformers.models.gpt2.modeling_gpt2 import (
-    GPT2LMHeadModel,
-    GPT2Model,
-    GPT2Block,
-    GPT2Attention,
-    GPT2MLP,
-    CausalLMOutputWithCrossAttentions,
+# Import custom model classes from model.py
+from model import (
+    CustomGPT2Config,
+    CustomGPT2LMHeadModel,
 )
 
-class CustomGPT2Attention(GPT2Attention):
-    def __init__(self, config, is_cross_attention=False):
-        super().__init__(config, is_cross_attention)
-        # biases are included
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=True)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=True)
+# Custom model classes are now imported from model.py
 
-class CustomGPT2MLP(GPT2MLP):
-    def __init__(self, intermediate_size, config):
-        super().__init__(intermediate_size, config)
-        self.c_fc = nn.Linear(config.n_embd, intermediate_size, bias=True)
-        self.c_proj = nn.Linear(intermediate_size, config.n_embd, bias=True)
-        self.act = nn.GELU()  # Use standard GeLU
-
-class CustomGPT2Block(GPT2Block):
-    def __init__(self, config):
-        super().__init__(config)
-        self.use_pre_layernorm = config.use_pre_layernorm
-        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.attn = CustomGPT2Attention(config)
-        self.mlp = CustomGPT2MLP(4 * config.n_embd, config)
-        self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-
-    def forward(
-        self,
-        hidden_states,
-        layer_past=None,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
-        if self.use_pre_layernorm:
-            # Pre-LayerNorm
-            residual = hidden_states
-            hidden_states = self.ln_1(hidden_states)
-            attn_outputs = self.attn(
-                hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
-            attn_output = attn_outputs[0]
-            outputs = attn_outputs[1:]  # present, (attentions)
-
-            hidden_states = residual + attn_output
-
-            residual = hidden_states
-            hidden_states = self.ln_2(hidden_states)
-            feed_forward_hidden_states = self.mlp(hidden_states)
-            hidden_states = residual + feed_forward_hidden_states
-        else:
-            # Original GPT-2 Post-LayerNorm
-            residual = hidden_states
-            attn_outputs = self.attn(
-                hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
-            attn_output = attn_outputs[0]
-            outputs = attn_outputs[1:]  # present, (attentions)
-
-            hidden_states = residual + attn_output
-            hidden_states = self.ln_1(hidden_states)
-
-            residual = hidden_states
-            feed_forward_hidden_states = self.mlp(hidden_states)
-            hidden_states = residual + feed_forward_hidden_states
-            hidden_states = self.ln_2(hidden_states)
-
-        if use_cache:
-            outputs = (hidden_states,) + outputs
-        else:
-            outputs = (hidden_states,) + outputs[1:]
-
-        return outputs  # hidden_states, present, (attentions)
-
-class CustomGPT2Model(GPT2Model):
-    def __init__(self, config):
-        super().__init__(config)
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd)
-        self.drop = nn.Dropout(config.embd_pdrop)
-        self.h = nn.ModuleList([CustomGPT2Block(config) for _ in range(config.n_layer)])
-        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-
-        self.init_weights()
-
-class CustomGPT2LMHeadModel(GPT2LMHeadModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.transformer = CustomGPT2Model(config)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-
-        self.init_weights()
-
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        labels=None,
-    ):
-        transformer_outputs = self.transformer(
-            input_ids,
-            attention_mask=attention_mask,
-        )
-        hidden_states = transformer_outputs[0]
-
-        lm_logits = self.lm_head(hidden_states)
-
-        loss = None
-        if labels is not None:
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-
-        return CausalLMOutputWithCrossAttentions(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-            cross_attentions=transformer_outputs.cross_attentions,
-        )
-
-# Configuration
+# Configuration for 125M model
 config = CustomGPT2Config(
     vocab_size=tokenizer.vocab_size,
-    n_positions=2048, # Max position embeddings aka maximum length that the model can handle
-    n_ctx=2048,   # Max context length for generation
-    n_embd=768,   # Embedding dimension
-    n_layer=12,   # Number of transformer blocks
-    n_head=12,    # Number of attention heads
-    n_inner=3072, # Dimension of the feedforward layer
-    activation_function='gelu',  # Standard GeLU
+    max_position_embeddings=2048, # Max position embeddings aka maximum length that the model can handle
+    n_ctx=2048,                   # Max context length for generation
+    hidden_size=768,              # Embedding dimension
+    num_hidden_layers=12,         # Number of transformer blocks
+    num_attention_heads=12,       # Number of attention heads
+    intermediate_size=3072,       # Dimension of the feedforward layer
+    activation_function='gelu',   # Standard GeLU
     resid_pdrop=0.0,
     embd_pdrop=0.0,
     attn_pdrop=0.0,
@@ -315,7 +176,7 @@ def custom_init_weights(module):
             module.bias.data.zero_()
     if isinstance(module, nn.Linear) and hasattr(module, 'weight'):
         # Apply scaling to residual projections
-        module.weight.data.mul_(1 / math.sqrt(2 * config.n_layer))
+        module.weight.data.mul_(1 / math.sqrt(2 * config.num_hidden_layers))
 
 model.apply(custom_init_weights)
 
