@@ -1,0 +1,28 @@
+2025-09-03 14:06:41,982 INFO WandB initialized
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`...
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\runpy.py", line 187, in _run_module_as_main
+    mod_name, mod_spec, code = _get_module_details(mod_name, _Error)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\runpy.py", line 110, in _get_module_details
+    __import__(pkg_name)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-multi.py", line 513, in <module>
+    optimizer.step()
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\lr_scheduler.py", line 68, in wrapper
+    return wrapped(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\optimizer.py", line 373, in wrapper
+    out = func(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\optimizer.py", line 76, in _use_grad
+    ret = func(self, *args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\adamw.py", line 184, in step
+    adamw(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\adamw.py", line 335, in adamw
+    func(
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\adamw.py", line 509, in _multi_tensor_adamw
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\optim\optimizer.py", line 397, in _group_tensors_by_device_and_dtype
+    return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\utils\_contextlib.py", line 115, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\Users\kelle\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\torch\utils\_foreach_utils.py", line 42, in _group_tensors_by_device_and_dtype
+    torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices).items()
+RuntimeError: Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32 notwithstanding

@@ -429,6 +429,9 @@ def autocast_if_bf16():
 optimizer = torch.optim.AdamW(model.parameters(), lr=6e-4, betas=(0.9, 0.95), eps=1e-8, weight_decay=0.1)
 scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=int(0.1 * args.total_steps), num_training_steps=args.total_steps)
 
+# GradScaler for mixed precision training
+scaler = torch.cuda.amp.GradScaler() if use_bf16 else None
+
 # -------- wandb init (optional) ----------
 run = None
 if args.wandb:
@@ -460,6 +463,8 @@ if args.resume and os.path.exists(checkpoint_dir):
             model.load_state_dict(state_dict)
         optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'optimizer_state.pt'), map_location=map_loc))
         scheduler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scheduler_state.pt'), map_location=map_loc))
+        if scaler is not None and os.path.exists(os.path.join(checkpoint_dir, 'scaler_state.pt')):
+            scaler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scaler_state.pt'), map_location=map_loc))
         with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'r') as f:
             global_step = int(f.readline().strip())
         logger.info(f"Resumed from step {global_step}")
@@ -505,12 +510,25 @@ try:
                 if loss is None:
                     raise RuntimeError("No loss returned; check labels shape.")
                 loss = loss / gradient_accumulation_steps
-                loss.backward()
+
+                # Use scaler for BF16 training
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
             accumulated_loss += loss.item() * gradient_accumulation_steps  # accumulate raw for logging
 
-        # gradient clipping
+        # gradient clipping and optimizer step
+        if scaler is not None:
+            scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-        optimizer.step()
+
+        if scaler is not None:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+
         scheduler.step()
         global_step += 1
 
@@ -524,6 +542,8 @@ try:
                     torch.save(save_state, os.path.join(checkpoint_dir, 'model_state.pt'))
                     torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
                     torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+                    if scaler is not None:
+                        torch.save(scaler.state_dict(), os.path.join(checkpoint_dir, 'scaler_state.pt'))
                     with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
                         f.write(f"{global_step}\n")
                     logger.info(f"Emergency checkpoint saved at step {global_step}")
@@ -533,6 +553,8 @@ try:
                 torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
                 torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
                 torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+                if scaler is not None:
+                    torch.save(scaler.state_dict(), os.path.join(checkpoint_dir, 'scaler_state.pt'))
                 with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
                     f.write(f"{global_step}\n")
                 logger.info(f"Emergency checkpoint saved at step {global_step}")
@@ -607,6 +629,8 @@ except KeyboardInterrupt:
             torch.save(save_state, os.path.join(checkpoint_dir, 'model_state.pt'))
             torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
             torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+            if scaler is not None:
+                torch.save(scaler.state_dict(), os.path.join(checkpoint_dir, 'scaler_state.pt'))
             with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
                 f.write(f"{global_step}\n")
             logger.info(f"Emergency checkpoint saved at step {global_step}")
@@ -616,6 +640,8 @@ except KeyboardInterrupt:
         torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
         torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
         torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
+        if scaler is not None:
+            torch.save(scaler.state_dict(), os.path.join(checkpoint_dir, 'scaler_state.pt'))
         with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
             f.write(f"{global_step}\n")
         logger.info(f"Emergency checkpoint saved at step {global_step}")
