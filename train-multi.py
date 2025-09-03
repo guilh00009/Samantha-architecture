@@ -460,7 +460,7 @@ if args.resume and os.path.exists(checkpoint_dir):
 # -------- training hyperparams ----------
 gradient_accumulation_steps = args.grad_accum
 logging_steps = 100
-save_steps = 10000
+save_steps = 5000000
 eval_steps = 2000
 emergency_save_steps = 500
 total_steps = args.total_steps
