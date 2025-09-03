@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-# train-multi-samantha.py
-# Updated training script derived from your 17M file.
-# Adds model_size options: 17m, 125m, 250m, 350m.
-# Keeps streaming dataset approach, emergency checkpointing, and RTX-3050-friendly defaults.
+# train-multi-samantha-fixed.py
+# Fixed/cleaned version of the script you provided.
 
 import os
 import math
@@ -19,7 +17,7 @@ from transformers import (
     GPT2TokenizerFast,
     get_cosine_schedule_with_warmup,
 )
-from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions, CausalLMOutputWithCrossAttentions
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from datasets import load_dataset, interleave_datasets
 
 # -------- CLI ----------
@@ -34,15 +32,16 @@ parser.add_argument("--grad_accum", type=int, default=8, help="Gradient accumula
 parser.add_argument("--total_steps", type=int, default=600000)
 parser.add_argument("--stream_chunk", type=int, default=10)
 parser.add_argument("--num_validation_batches", type=int, default=100)
-parser.add_argument("--tie_lm_head", action="store_true", default=True, help="Tie lm_head to token embeddings (recommended)")
+# Tie by default; pass --no_tie_lm_head to disable
+parser.add_argument("--no_tie_lm_head", action="store_true", help="Disable tying lm_head to token embeddings")
 args = parser.parse_args()
 
 # -------- quick environment safe defaults ----------
-# Keep bfloat16 default as you had, but only if GPU/bf16 available. We'll try to set it but not fail if unsupported.
+# Setting default dtype may be dangerous in some environments; leave as-is only if it succeeds.
 try:
-    # This may error on some environments; ignore if it does
     torch.set_default_dtype(torch.bfloat16)
 except Exception:
+    # ignore if not supported
     pass
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -60,7 +59,6 @@ logger = logging.getLogger("samantha-train")
 # ------------------- DDP SETUP (place near the top, after parser and args) -------------------
 import torch.distributed as dist
 
-# When launching with torch.distributed.run, LOCAL_RANK will be set.
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
 RANK = int(os.environ.get("RANK", 0))
@@ -79,8 +77,10 @@ else:
 
 # -------- tokenizer ----------
 tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+# ensure pad token exists
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
+pad_token_id = tokenizer.pad_token_id
 
 vocab_size = tokenizer.vocab_size
 n_positions = args.block_size
@@ -121,6 +121,7 @@ def load_datasets(dataset_names, split="train", streaming=True):
     return datasets_list
 
 training_datasets = load_datasets(dataset_names, split="train", streaming=True)
+# interleave streaming datasets to form a single stream
 training_dataset = interleave_datasets(training_datasets)
 
 # ---------- streaming tokenization (on-the-fly) ----------
@@ -128,12 +129,17 @@ def tokenize_and_chunk_stream(dataset_iter, chunk_size=10, block_size=256):
     buffer_input_ids = []
     buffer_attention_mask = []
     for example in dataset_iter:
+        # example can be a dict-like object; prefer 'text' key
         text = example.get("text", None)
         if not text:
             continue
         tokenized = tokenizer(text, truncation=True, max_length=block_size, padding=False, return_tensors='pt', return_attention_mask=True)
         ids = tokenized['input_ids'].squeeze().tolist()
+        if isinstance(ids, int):
+            ids = [ids]
         attn = tokenized['attention_mask'].squeeze().tolist()
+        if isinstance(attn, int):
+            attn = [attn]
         buffer_input_ids.append(ids)
         buffer_attention_mask.append(attn)
         if len(buffer_input_ids) >= chunk_size:
@@ -153,6 +159,7 @@ def group_texts(examples, block_size):
     return {'input_ids': out, 'labels': labels}
 
 stream_iter = tokenize_and_chunk_stream(training_dataset, chunk_size=args.stream_chunk, block_size=args.block_size)
+# grouped_train_dataset is a generator that yields dicts with lists-of-blocks
 grouped_train_dataset = (group_texts(batch, args.block_size) for batch in stream_iter)
 
 # ------------------- MODIFY StreamDataset to shard across processes -------------------
@@ -182,6 +189,7 @@ if use_ddp:
 else:
     train_dataset = StreamDataset(grouped_train_dataset, rank=0, world_size=1)
 
+# DataLoader: for IterableDataset, set batch_size to args.micro_batch to stack items into batches
 train_dataloader = DataLoader(train_dataset, batch_size=args.micro_batch, num_workers=0)
 
 def create_validation_dataset(train_dataset, num_batches):
@@ -197,17 +205,15 @@ def create_validation_dataset(train_dataset, num_batches):
 
 # Similarly when building validation_data, run only on rank 0 (or shard similarly)
 if use_ddp:
-    # Only rank 0 builds a validation cache to save time; others get empty validation set
     if RANK == 0:
         validation_data = create_validation_dataset(train_dataset, args.num_validation_batches)
     else:
         validation_data = []
-    # broadcast a barrier to ensure rank0 prepared files if needed
     dist.barrier()
 else:
     validation_data = create_validation_dataset(train_dataset, args.num_validation_batches)
 
-validation_dataloader = DataLoader(validation_data, batch_size=max(1, min(4, len(validation_data))), num_workers=0)
+validation_dataloader = DataLoader(validation_data, batch_size=max(1, min(4, len(validation_data))), num_workers=0) if len(validation_data) > 0 else None
 
 # -------- Custom GPT-2 components (based on your code) ----------
 from transformers.models.gpt2.modeling_gpt2 import (
@@ -225,35 +231,45 @@ class CustomGPT2Config(GPT2Config):
 
 class CustomGPT2Attention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False):
-        super().__init__(config, is_cross_attention)
+        # call parent init so internal shapes are correct
+        super().__init__(config, is_cross_attention=is_cross_attention)
+        # Recreate linear layers to ensure explicit shapes (keeps semantics)
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=True)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=True)
 
 class CustomGPT2MLP(GPT2MLP):
-    def __init__(self, intermediate_size, config):
-        super().__init__(intermediate_size, config)
-        self.c_fc = nn.Linear(config.n_embd, intermediate_size, bias=True)
-        self.c_proj = nn.Linear(intermediate_size, config.n_embd, bias=True)
+    def __init__(self, config):
+        # GPT2MLP typically expects intermediate size as config.n_inner
+        super().__init__(config.n_inner, config)
+        # override layers to ensure consistent shapes and activation
+        self.c_fc = nn.Linear(config.n_embd, config.n_inner, bias=True)
+        self.c_proj = nn.Linear(config.n_inner, config.n_embd, bias=True)
         self.act = nn.GELU()
 
 class CustomGPT2Block(GPT2Block):
     def __init__(self, config):
+        # call base init to ensure things like causal mask buffers are created
         super().__init__(config)
-        self.use_pre_layernorm = config.use_pre_layernorm
+        self.use_pre_layernorm = getattr(config, "use_pre_layernorm", True)
+        # replace attention and mlp with our custom versions (shapes consistent)
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = CustomGPT2Attention(config)
-        self.mlp = CustomGPT2MLP(4 * config.n_embd, config)
+        # Use config.n_inner for mlp intermediate size (consistent with config)
+        self.mlp = CustomGPT2MLP(config)
         self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
+    # keep forward behavior of GPT2Block (we rely on parent implementation)
     def forward(self, *args, **kwargs):
         return super().forward(*args, **kwargs)
 
 class CustomGPT2Model(GPT2Model):
     def __init__(self, config):
         super().__init__(config)
+        # replace embeddings with explicit sizes (in case config changed)
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
+        # override blocks with our custom ones
         self.h = nn.ModuleList([CustomGPT2Block(config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.init_weights()
@@ -275,6 +291,7 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
         lm_logits = self.lm_head(hidden_states)
         loss = None
         if labels is not None:
+            # shift tokens for causal language modeling
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             loss_fct = nn.CrossEntropyLoss()
@@ -282,10 +299,10 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
             logits=lm_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-            cross_attentions=transformer_outputs.cross_attentions,
+            past_key_values=transformer_outputs.past_key_values if hasattr(transformer_outputs, 'past_key_values') else None,
+            hidden_states=transformer_outputs.hidden_states if hasattr(transformer_outputs, 'hidden_states') else None,
+            attentions=transformer_outputs.attentions if hasattr(transformer_outputs, 'attentions') else None,
+            cross_attentions=transformer_outputs.cross_attentions if hasattr(transformer_outputs, 'cross_attentions') else None,
         )
 
 # -------- Build configuration & model ----------
@@ -296,7 +313,7 @@ cfg = CustomGPT2Config(
     n_embd=cfg_spec['n_embd'],
     n_layer=cfg_spec['n_layer'],
     n_head=cfg_spec['n_head'],
-    n_inner=cfg_spec['intermediate'],
+    n_inner=cfg_spec['intermediate'],  # GPT2 uses n_inner as MLP intermediate size
     activation_function='gelu',
     resid_pdrop=0.0,
     embd_pdrop=0.0,
@@ -306,8 +323,9 @@ cfg = CustomGPT2Config(
 
 model = CustomGPT2LMHeadModel(cfg)
 
-# Optionally tie lm_head to embedding to save memory (recommended)
-if args.tie_lm_head:
+# Optionally tie lm_head to embedding to save memory (enabled by default unless --no_tie_lm_head)
+tie_lm_head = not args.no_tie_lm_head
+if tie_lm_head:
     try:
         model.lm_head.weight = model.transformer.wte.weight
         tied_ok = True
@@ -320,10 +338,8 @@ else:
 
 # compute and print parameter counts (detailed)
 def compute_counts(vocab_size, n_positions, n_embd, n_layer, intermediate, tied):
-    # token embed + pos embed
     token_embed = vocab_size * n_embd
     pos_embed = n_positions * n_embd
-    # per-block (attention + proj + mlp + ln params)
     c_attn_w = n_embd * (3 * n_embd)
     c_attn_b = 3 * n_embd
     c_proj_w = n_embd * n_embd
@@ -332,7 +348,8 @@ def compute_counts(vocab_size, n_positions, n_embd, n_layer, intermediate, tied)
     c_fc_b = intermediate
     mlp_proj_w = intermediate * n_embd
     mlp_proj_b = n_embd
-    ln_params = 2 * (n_embd * 2)  # ln_1 and ln_2 each weight+bias
+    # layernorm params: weight + bias per LayerNorm = 2 * n_embd
+    ln_params = 2 * (2 * n_embd)  # ln_1 and ln_2 (weight + bias each)
     per_block = (c_attn_w + c_attn_b + c_proj_w + c_proj_b + c_fc_w + c_fc_b + mlp_proj_w + mlp_proj_b + ln_params)
     total_blocks = per_block * n_layer
     ln_f = n_embd * 2
@@ -373,7 +390,7 @@ def custom_init_weights(module):
         module.weight.data.mul_(1.0 / math.sqrt(2.0 * max(1, cfg.n_layer)))
 
 model.apply(custom_init_weights)
-# enable gradient checkpointing to save activation memory
+# enable gradient checkpointing to save activation memory if supported
 try:
     model.gradient_checkpointing_enable()
     logger.info("Enabled gradient checkpointing.")
@@ -384,17 +401,16 @@ except Exception:
 model.to(device)
 
 # enable BF16 autocast context where appropriate
-use_bf16 = True  # A100 supports BF16; you can add a safe runtime check if desired
+use_bf16 = torch.cuda.is_available() and (torch.cuda.get_device_capability(device.index if hasattr(device, 'index') else 0)[0] >= 7)
 
-# tie lm_head if requested (same as earlier)
-if args.tie_lm_head:
+if tie_lm_head:
     try:
         model.lm_head.weight = model.transformer.wte.weight
     except Exception:
         pass
 
 if use_ddp:
-    # wrap in DistributedDataParallel
+    # wrap in DistributedDataParallel (module must be on device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[LOCAL_RANK], output_device=LOCAL_RANK, find_unused_parameters=False)
 
 # ------------------- Training loop changes: use autocast BF16 and DDP-safe checkpointing -------------------
@@ -419,23 +435,10 @@ if args.wandb:
     try:
         import wandb
         run_name = f"samantha-{args.model_size}-{int(time.time())}"
-        if args.resume:
-            # try to read stored run id
-            run_id_path = "./emergency_checkpoint_17m/run_id.txt"
-            if os.path.exists(run_id_path):
-                with open(run_id_path, "r") as f:
-                    run_id = f.read().strip()
-                run = wandb.init(project="samantha-multi", id=run_id, resume="allow")
-            else:
-                run = wandb.init(project="samantha-multi", name=run_name)
-                os.makedirs('./emergency_checkpoint_17m', exist_ok=True)
-                with open('./emergency_checkpoint_17m/run_id.txt', 'w') as f:
-                    f.write(wandb.run.id)
-        else:
-            run = wandb.init(project="samantha-multi", name=run_name)
-            os.makedirs('./emergency_checkpoint_17m', exist_ok=True)
-            with open('./emergency_checkpoint_17m/run_id.txt', 'w') as f:
-                f.write(wandb.run.id)
+        os.makedirs('./emergency_checkpoint_17m', exist_ok=True)
+        run = wandb.init(project="samantha-multi", name=run_name)
+        with open('./emergency_checkpoint_17m/run_id.txt', 'w') as f:
+            f.write(wandb.run.id)
         logger.info("WandB initialized")
     except Exception as e:
         logger.warning(f"WandB init failed: {e}")
@@ -447,9 +450,16 @@ global_step = 0
 if args.resume and os.path.exists(checkpoint_dir):
     try:
         logger.info("Loading emergency checkpoint...")
-        model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'model_state.pt'), map_location=device))
-        optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'optimizer_state.pt'), map_location=device))
-        scheduler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scheduler_state.pt'), map_location=device))
+        # Note: if model is DDP-wrapped, need to load into module
+        map_loc = {"cuda:0": f"cuda:{LOCAL_RANK}"} if torch.cuda.is_available() else "cpu"
+        state_dict = torch.load(os.path.join(checkpoint_dir, 'model_state.pt'), map_location=map_loc)
+        # If DDP, model might be wrapped; load to module if needed
+        if hasattr(model, "module"):
+            model.module.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
+        optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'optimizer_state.pt'), map_location=map_loc))
+        scheduler.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'scheduler_state.pt'), map_location=map_loc))
         with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'r') as f:
             global_step = int(f.readline().strip())
         logger.info(f"Resumed from step {global_step}")
@@ -477,21 +487,21 @@ try:
 
         for acc_step in range(gradient_accumulation_steps):
             batch = next(train_iterator)
+            # batch is dict with 'input_ids' shape (micro_batch, seq_len)
             inputs = {k: v.to(device) for k, v in batch.items()}
 
             # pad if necessary (should be rare)
             if inputs['input_ids'].shape[-1] != args.block_size:
                 to_pad = args.block_size - inputs['input_ids'].shape[-1]
                 if to_pad > 0:
-                    pad_tok = tokenizer.pad_token_id or tokenizer.eos_token_id
+                    pad_tok = pad_token_id or tokenizer.eos_token_id
                     pad_tensor = torch.full((inputs['input_ids'].shape[0], to_pad), pad_tok, dtype=torch.long, device=device)
                     inputs['input_ids'] = torch.cat([inputs['input_ids'], pad_tensor], dim=1)
                     inputs['labels'] = torch.cat([inputs['labels'], pad_tensor], dim=1)
 
-            # Inside your usual training step where you do forward/backward:
             with autocast_if_bf16():
-                outputs = model(input_ids=inputs['input_ids'], attention_mask=(inputs['input_ids'] != tokenizer.pad_token_id).long(), labels=inputs['labels'])
-                loss = outputs.loss
+                out = model(input_ids=inputs['input_ids'], attention_mask=(inputs['input_ids'] != pad_token_id).long(), labels=inputs['labels'])
+                loss = out.loss
                 if loss is None:
                     raise RuntimeError("No loss returned; check labels shape.")
                 loss = loss / gradient_accumulation_steps
@@ -507,11 +517,11 @@ try:
         # Checkpoint saving (only rank 0 writes full model files to disk)
         if global_step % emergency_save_steps == 0:
             if use_ddp:
-                dist.barrier()  # synchronize before saving
+                dist.barrier()
                 if RANK == 0:
-                    # save same as before
                     os.makedirs(checkpoint_dir, exist_ok=True)
-                    torch.save(model.module.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+                    save_state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+                    torch.save(save_state, os.path.join(checkpoint_dir, 'model_state.pt'))
                     torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
                     torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
                     with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
@@ -519,7 +529,6 @@ try:
                     logger.info(f"Emergency checkpoint saved at step {global_step}")
                 dist.barrier()
             else:
-                # single process save
                 os.makedirs(checkpoint_dir, exist_ok=True)
                 torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
                 torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
@@ -538,7 +547,7 @@ try:
                 run.log({'train/loss': avg_loss, 'train/perplexity': perp, 'train/grad_norm': grad_norm, 'train/lr': lr, 'train/step': global_step})
 
         # evaluation
-        if global_step % eval_steps == 0 or global_step == 1:
+        if (global_step % eval_steps == 0) or (global_step == 1):
             if validation_dataloader is not None and len(validation_dataloader) > 0:
                 model.eval()
                 val_loss = 0.0
@@ -546,7 +555,7 @@ try:
                 with torch.no_grad():
                     for vb in validation_dataloader:
                         vb = {k: v.to(device) for k, v in vb.items()}
-                        out = model(input_ids=vb['input_ids'], attention_mask=(vb['input_ids'] != tokenizer.pad_token_id).long(), labels=vb['labels'])
+                        out = model(input_ids=vb['input_ids'], attention_mask=(vb['input_ids'] != pad_token_id).long(), labels=vb['labels'])
                         val_loss += out.loss.item()
                         val_steps += 1
                 if val_steps > 0:
@@ -557,15 +566,14 @@ try:
                         run.log({'validation/loss': avg_val_loss, 'validation/perplexity': val_perp, 'validation/step': global_step})
                 model.train()
 
-        # periodic save
+        # periodic save (long interval)
         if global_step % save_steps == 0:
             if use_ddp:
-                dist.barrier()  # synchronize before saving
+                dist.barrier()
                 if RANK == 0:
                     save_path = f'./samantha-{args.model_size}-step-{global_step}'
                     os.makedirs(save_path, exist_ok=True)
                     try:
-                        # Try HF-style save; if custom class mismatch, fallback to state_dict
                         model.module.save_pretrained(save_path)
                         tokenizer.save_pretrained(save_path)
                         logger.info(f"Model saved to {save_path}")
@@ -578,7 +586,6 @@ try:
                 save_path = f'./samantha-{args.model_size}-step-{global_step}'
                 os.makedirs(save_path, exist_ok=True)
                 try:
-                    # Try HF-style save; if custom class mismatch, fallback to state_dict
                     model.save_pretrained(save_path)
                     tokenizer.save_pretrained(save_path)
                     logger.info(f"Model saved to {save_path}")
@@ -587,17 +594,17 @@ try:
                     tokenizer.save_pretrained(save_path)
                     logger.info(f"State dict saved to {save_path} (custom save fallback)")
 
-        # stop
         if global_step >= total_steps:
             break
 
 except KeyboardInterrupt:
     logger.info("Training interrupted by user. Saving emergency checkpoint...")
     if use_ddp:
-        dist.barrier()  # synchronize before saving
+        dist.barrier()
         if RANK == 0:
             os.makedirs(checkpoint_dir, exist_ok=True)
-            torch.save(model.module.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
+            save_state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+            torch.save(save_state, os.path.join(checkpoint_dir, 'model_state.pt'))
             torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
             torch.save(scheduler.state_dict(), os.path.join(checkpoint_dir, 'scheduler_state.pt'))
             with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w') as f:
@@ -615,7 +622,7 @@ except KeyboardInterrupt:
 
 # final save
 if use_ddp:
-    dist.barrier()  # synchronize before saving
+    dist.barrier()
     if RANK == 0:
         final_save_path = f'./samantha-{args.model_size}-final'
         os.makedirs(final_save_path, exist_ok=True)
