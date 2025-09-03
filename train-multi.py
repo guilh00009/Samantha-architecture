@@ -30,7 +30,7 @@ parser.add_argument("--block_size", type=int, default=256, help="Context length 
 parser.add_argument("--micro_batch", type=int, default=1, help="Per-device micro-batch size")
 parser.add_argument("--grad_accum", type=int, default=8, help="Gradient accumulation steps")
 parser.add_argument("--total_steps", type=int, default=600000)
-parser.add_argument("--stream_chunk", type=int, default=10)
+parser.add_argument("--stream_chunk", type=int, default=25000)
 parser.add_argument("--num_validation_batches", type=int, default=100)
 # Tie by default; pass --no_tie_lm_head to disable
 parser.add_argument("--no_tie_lm_head", action="store_true", help="Disable tying lm_head to token embeddings")
