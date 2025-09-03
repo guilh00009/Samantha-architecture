@@ -519,8 +519,8 @@ try:
             accumulated_loss += loss.item() * gradient_accumulation_steps  # accumulate raw for logging
 
         # gradient clipping and optimizer step
-        if scaler is not None:
-            scaler.unscale_(optimizer)
+        # Note: scaler.unscale_() is not compatible with BF16, so we skip it
+        # GradScaler handles gradient scaling internally
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
         if scaler is not None:
