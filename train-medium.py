@@ -3,6 +3,7 @@
 
 import os
 import math
+import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import IterableDataset, DataLoader
@@ -11,6 +12,7 @@ from transformers import (
     GPT2TokenizerFast,
     get_cosine_schedule_with_warmup,
 )
+from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 from datasets import load_dataset, interleave_datasets
 import wandb
 from itertools import islice, cycle
@@ -21,9 +23,36 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 
-from lion_pytorch import Lion
-
 start_time = time.time()
+
+# Retry function for handling streaming errors
+def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0, backoff_factor=2.0):
+    """
+    Retry a function with exponential backoff on failures.
+
+    Args:
+        func: Function to retry
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay in seconds
+        max_delay: Maximum delay between retries
+        backoff_factor: Factor to multiply delay by after each failure
+    """
+    last_exception = None
+    delay = base_delay
+
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries:
+                print(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay:.1f} seconds...")
+                time.sleep(delay)
+                delay = min(delay * backoff_factor, max_delay)
+            else:
+                print(f"All {max_retries + 1} attempts failed. Last error: {str(e)}")
+
+    raise last_exception
 
 # Define setup and cleanup functions for distributed training
 def setup(rank, world_size):
@@ -47,21 +76,21 @@ def train(rank, world_size, args):
     # Initialize wandb only on rank 0 to prevent multiple initializations
     if rank == 0:
         if not args.resume:
-            run = wandb.init(project='samantha-medium', name='samantha-medium-fineweb-training')
+            run = wandb.init(project='samantha-350m', name='samantha-350m-fineweb-training')
             run_id = wandb.run.id
-            os.makedirs('./emergency_checkpoint_medium', exist_ok=True)
-            with open('./emergency_checkpoint_medium/run_id.txt', 'w') as f:
+            os.makedirs('./emergency_checkpoint_samantha_350m', exist_ok=True)
+            with open('./emergency_checkpoint_samantha_350m/run_id.txt', 'w') as f:
                 f.write(run_id)
         else:
-            if os.path.exists('./emergency_checkpoint_medium/run_id.txt'):
-                with open('./emergency_checkpoint_medium/run_id.txt', 'r') as f:
+            if os.path.exists('./emergency_checkpoint_samantha_350m/run_id.txt'):
+                with open('./emergency_checkpoint_samantha_350m/run_id.txt', 'r') as f:
                     run_id = f.read().strip()
-                run = wandb.init(project='samantha-medium',
+                run = wandb.init(project='samantha-350m',
                                  id=run_id,
                                  resume="allow")
                 print(f"Resuming WandB run with id {run_id}")
             else:
-                run = wandb.init(project='samantha-medium', name='samantha-medium-fineweb-training')
+                run = wandb.init(project='samantha-350m', name='samantha-350m-fineweb-training')
 
     # tokenizer
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
@@ -70,26 +99,35 @@ def train(rank, world_size, args):
     global block_size
     block_size = 512  # For testing purposes; set to 2048 for full training
 
-    # Load datasets
-    dataset1 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2024-10",
-        split="train",
-        streaming=True
+    # Load datasets with retry logic for streaming errors
+    print("Loading dataset 1 (CC-MAIN-2024-10)...")
+    dataset1 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2024-10",
+            split="train",
+            streaming=True
+        )
     )
 
-    dataset2 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2024-18",
-        split="train",
-        streaming=True
+    print("Loading dataset 2 (CC-MAIN-2024-18)...")
+    dataset2 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2024-18",
+            split="train",
+            streaming=True
+        )
     )
 
-    dataset3 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2023-50",
-        split="train",
-        streaming=True
+    print("Loading dataset 3 (CC-MAIN-2023-50)...")
+    dataset3 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2023-50",
+            split="train",
+            streaming=True
+        )
     )
 
     # Combine the datasets
@@ -144,20 +182,43 @@ def train(rank, world_size, args):
 
         def __iter__(self):
             # distribute the dataset to different nodes
-            for idx, batch in enumerate(self.grouped_dataset):
+            batch_idx = 0
+            grouped_iter = iter(self.grouped_dataset)
+
+            while True:
+                try:
+                    batch = next(grouped_iter)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    print(f"Error during dataset iteration at batch {batch_idx}: {str(e)}")
+                    print("Attempting to skip this batch and continue...")
+                    batch_idx += 1
+                    continue
+
                 # Only yield the batch if the index corresponds to the rank
-                if (idx % self.world_size) == self.rank:
-                    for i in range(len(batch['input_ids'])):
-                        yield {
-                            'input_ids': torch.tensor(batch['input_ids'][i], dtype=torch.long),
-                            'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
-                        }
+                if (batch_idx % self.world_size) == self.rank:
+                    try:
+                        for i in range(len(batch['input_ids'])):
+                            yield {
+                                'input_ids': torch.tensor(batch['input_ids'][i], dtype=torch.long),
+                                'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
+                            }
+                    except Exception as e:
+                        print(f"Error processing batch {batch_idx}, sample {i}: {str(e)}")
+                        print("Skipping this sample and continuing...")
+                        continue
+
+                batch_idx += 1
 
     train_dataset = StreamDataset(grouped_dataset=grouped_dataset, rank=rank, world_size=world_size)
     train_dataloader = DataLoader(train_dataset, batch_size=4, num_workers=0)
 
-    # Load the validation dataset (Wikitext-2)
-    validation_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
+    # Load the validation dataset (Wikitext-2) with retry logic
+    print("Loading validation dataset (Wikitext-2)...")
+    validation_dataset = retry_with_backoff(
+        lambda: load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
+    )
 
     # Tokenize
     tokenized_validation_dataset = validation_dataset.map(
@@ -231,19 +292,19 @@ def train(rank, world_size, args):
     device = torch.device("cpu")
     model.to(device)
 
-    model = torch.compile(model, mode='max-autotune')
     model = DDP(model)
 
     # Set up the optimizer and learning rate scheduler
     total_steps = 600000  # desired total training steps
     warmup_steps = 60000  # Typically 10% of total_steps
 
-    # optimizer hyperparameters (Lion optimizer for medium model)
-    optimizer = Lion(
+    # optimizer hyperparameters
+    optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=6e-4,
-        betas=(0.9, 0.99),
-        weight_decay=0.01,
+        betas=(0.9, 0.95),
+        eps=1e-8,
+        weight_decay=0.1
     )
 
     scheduler = get_cosine_schedule_with_warmup(
@@ -252,7 +313,7 @@ def train(rank, world_size, args):
         num_training_steps=total_steps
     )
 
-    gradient_accumulation_steps = 16  # Increased for memory efficiency with smaller batch size (medium model)
+    gradient_accumulation_steps = 8  # Increased for memory efficiency with smaller batch size
 
     # gradient clipping
     max_grad_norm = 1.0
@@ -262,7 +323,7 @@ def train(rank, world_size, args):
 
     # Resume training if --resume flag is used
     if args.resume:
-        checkpoint_dir = './emergency_checkpoint_medium'
+        checkpoint_dir = './emergency_checkpoint_samantha_350m'
         if os.path.exists(checkpoint_dir):
             if rank == 0:
                 print("Loading checkpoint from the emergency directory...")
@@ -320,7 +381,7 @@ def train(rank, world_size, args):
 
             # Emergency save (only on rank 0)
             if global_step % emergency_save_steps == 0 and rank == 0:
-                checkpoint_dir = './emergency_checkpoint_medium'
+                checkpoint_dir = './emergency_checkpoint_samantha_350m'
                 os.makedirs(checkpoint_dir, exist_ok=True)
                 torch.save(model.module.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
                 torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
@@ -379,7 +440,7 @@ def train(rank, world_size, args):
 
             # Saving the model (only on rank 0)
             if global_step > 0 and global_step % save_steps == 0 and rank == 0:
-                save_path = f'./samantha-medium-fineweb-step-{global_step}'
+                save_path = f'./samantha-350m-fineweb-step-{global_step}'
                 model.module.save_pretrained(save_path)
                 tokenizer.save_pretrained(save_path)
                 print(f"\nModel saved at step {global_step} to {save_path}")
@@ -389,12 +450,12 @@ def train(rank, world_size, args):
     except KeyboardInterrupt:
         if rank == 0:
             print("\nTraining interrupted by user. Saving model...")
-            save_path = f'./samantha-medium-fineweb-step-{global_step}'
+            save_path = f'./samantha-350m-fineweb-step-{global_step}'
             model.module.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
             print(f"Model saved at step {global_step} to {save_path}")
 
-            checkpoint_dir = './emergency_checkpoint_medium'
+            checkpoint_dir = './emergency_checkpoint_samantha_350m'
             os.makedirs(checkpoint_dir, exist_ok=True)
             torch.save(model.module.state_dict(), os.path.join(checkpoint_dir, 'model_state.pt'))
             torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, 'optimizer_state.pt'))
@@ -405,7 +466,7 @@ def train(rank, world_size, args):
 
     # Final save (only on rank 0)
     if rank == 0:
-        final_save_path = './samantha-medium-fineweb'
+        final_save_path = './samantha-350m-fineweb'
         model.module.save_pretrained(final_save_path)
         tokenizer.save_pretrained(final_save_path)
         print(f"\nFinal model saved to {final_save_path}")
