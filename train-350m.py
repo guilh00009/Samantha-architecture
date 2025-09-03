@@ -3,6 +3,7 @@
 
 import os
 import math
+import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import IterableDataset, DataLoader
@@ -11,6 +12,7 @@ from transformers import (
     GPT2TokenizerFast,
     get_cosine_schedule_with_warmup,
 )
+from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 from datasets import load_dataset, interleave_datasets
 import wandb
 from itertools import islice, cycle
@@ -22,6 +24,35 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 
 start_time = time.time()
+
+# Retry function for handling streaming errors
+def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0, backoff_factor=2.0):
+    """
+    Retry a function with exponential backoff on failures.
+
+    Args:
+        func: Function to retry
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay in seconds
+        max_delay: Maximum delay between retries
+        backoff_factor: Factor to multiply delay by after each failure
+    """
+    last_exception = None
+    delay = base_delay
+
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries:
+                print(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay:.1f} seconds...")
+                time.sleep(delay)
+                delay = min(delay * backoff_factor, max_delay)
+            else:
+                print(f"All {max_retries + 1} attempts failed. Last error: {str(e)}")
+
+    raise last_exception
 
 # Define setup and cleanup functions for distributed training
 def setup(rank, world_size):
@@ -68,26 +99,35 @@ def train(rank, world_size, args):
     global block_size
     block_size = 512  # For testing purposes; set to 2048 for full training
 
-    # Load datasets
-    dataset1 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2024-10",
-        split="train",
-        streaming=True
+    # Load datasets with retry logic for streaming errors
+    print("Loading dataset 1 (CC-MAIN-2024-10)...")
+    dataset1 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2024-10",
+            split="train",
+            streaming=True
+        )
     )
 
-    dataset2 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2024-18",
-        split="train",
-        streaming=True
+    print("Loading dataset 2 (CC-MAIN-2024-18)...")
+    dataset2 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2024-18",
+            split="train",
+            streaming=True
+        )
     )
 
-    dataset3 = load_dataset(
-        "HuggingFaceFW/fineweb",
-        name="CC-MAIN-2023-50",
-        split="train",
-        streaming=True
+    print("Loading dataset 3 (CC-MAIN-2023-50)...")
+    dataset3 = retry_with_backoff(
+        lambda: load_dataset(
+            "HuggingFaceFW/fineweb",
+            name="CC-MAIN-2023-50",
+            split="train",
+            streaming=True
+        )
     )
 
     # Combine the datasets
@@ -142,20 +182,43 @@ def train(rank, world_size, args):
 
         def __iter__(self):
             # distribute the dataset to different nodes
-            for idx, batch in enumerate(self.grouped_dataset):
+            batch_idx = 0
+            grouped_iter = iter(self.grouped_dataset)
+
+            while True:
+                try:
+                    batch = next(grouped_iter)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    print(f"Error during dataset iteration at batch {batch_idx}: {str(e)}")
+                    print("Attempting to skip this batch and continue...")
+                    batch_idx += 1
+                    continue
+
                 # Only yield the batch if the index corresponds to the rank
-                if (idx % self.world_size) == self.rank:
-                    for i in range(len(batch['input_ids'])):
-                        yield {
-                            'input_ids': torch.tensor(batch['input_ids'][i], dtype=torch.long),
-                            'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
-                        }
+                if (batch_idx % self.world_size) == self.rank:
+                    try:
+                        for i in range(len(batch['input_ids'])):
+                            yield {
+                                'input_ids': torch.tensor(batch['input_ids'][i], dtype=torch.long),
+                                'labels': torch.tensor(batch['labels'][i], dtype=torch.long),
+                            }
+                    except Exception as e:
+                        print(f"Error processing batch {batch_idx}, sample {i}: {str(e)}")
+                        print("Skipping this sample and continuing...")
+                        continue
+
+                batch_idx += 1
 
     train_dataset = StreamDataset(grouped_dataset=grouped_dataset, rank=rank, world_size=world_size)
     train_dataloader = DataLoader(train_dataset, batch_size=4, num_workers=0)
 
-    # Load the validation dataset (Wikitext-2)
-    validation_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
+    # Load the validation dataset (Wikitext-2) with retry logic
+    print("Loading validation dataset (Wikitext-2)...")
+    validation_dataset = retry_with_backoff(
+        lambda: load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
+    )
 
     # Tokenize
     tokenized_validation_dataset = validation_dataset.map(
@@ -229,7 +292,6 @@ def train(rank, world_size, args):
     device = torch.device("cpu")
     model.to(device)
 
-    model = torch.compile(model, mode='max-autotune')
     model = DDP(model)
 
     # Set up the optimizer and learning rate scheduler
