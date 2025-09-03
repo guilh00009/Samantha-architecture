@@ -29,9 +29,10 @@ from transformers.models.gpt2.modeling_gpt2 import (
 class CustomGPT2Attention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False):
         super().__init__(config, is_cross_attention)
-        # Ensure biases are included
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=True)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=True)
+        # Ensure biases are included - support both old and new naming conventions
+        hidden_dim = getattr(config, 'hidden_size', getattr(config, 'n_embd', 768))
+        self.c_attn = nn.Linear(hidden_dim, 3 * hidden_dim, bias=True)
+        self.c_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
     def forward(
         self,
@@ -58,18 +59,20 @@ class CustomGPT2Attention(GPT2Attention):
 class CustomGPT2MLP(GPT2MLP):
     def __init__(self, intermediate_size, config):
         super().__init__(intermediate_size, config)
-        self.c_fc = nn.Linear(config.n_embd, intermediate_size, bias=True)
-        self.c_proj = nn.Linear(intermediate_size, config.n_embd, bias=True)
+        hidden_dim = getattr(config, 'hidden_size', getattr(config, 'n_embd', 768))
+        self.c_fc = nn.Linear(hidden_dim, intermediate_size, bias=True)
+        self.c_proj = nn.Linear(intermediate_size, hidden_dim, bias=True)
         self.act = nn.GELU()  # Use standard GeLU
 
 class CustomGPT2Block(GPT2Block):
     def __init__(self, config):
         super().__init__(config)
         self.use_pre_layernorm = config.use_pre_layernorm
-        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        hidden_dim = getattr(config, 'hidden_size', getattr(config, 'n_embd', 768))
+        self.ln_1 = nn.LayerNorm(hidden_dim, eps=config.layer_norm_epsilon)
         self.attn = CustomGPT2Attention(config)
-        self.mlp = CustomGPT2MLP(4 * config.n_embd, config)
-        self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.mlp = CustomGPT2MLP(4 * hidden_dim, config)
+        self.ln_2 = nn.LayerNorm(hidden_dim, eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -139,11 +142,15 @@ class CustomGPT2Block(GPT2Block):
 class CustomGPT2Model(GPT2Model):
     def __init__(self, config):
         super().__init__(config)
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd)
+        hidden_dim = getattr(config, 'hidden_size', getattr(config, 'n_embd', 768))
+        n_positions = getattr(config, 'max_position_embeddings', getattr(config, 'n_positions', 1024))
+        n_layer = getattr(config, 'num_hidden_layers', getattr(config, 'n_layer', 12))
+
+        self.wte = nn.Embedding(config.vocab_size, hidden_dim)
+        self.wpe = nn.Embedding(n_positions, hidden_dim)
         self.drop = nn.Dropout(config.embd_pdrop)
-        self.h = nn.ModuleList([CustomGPT2Block(config) for _ in range(config.n_layer)])
-        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.h = nn.ModuleList([CustomGPT2Block(config) for _ in range(n_layer)])
+        self.ln_f = nn.LayerNorm(hidden_dim, eps=config.layer_norm_epsilon)
 
         self.init_weights()
 
@@ -310,7 +317,8 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
     def __init__(self, config):
         super().__init__(config)
         self.transformer = CustomGPT2Model(config)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        hidden_dim = getattr(config, 'hidden_size', getattr(config, 'n_embd', 768))
+        self.lm_head = nn.Linear(hidden_dim, config.vocab_size, bias=False)
 
         self.init_weights()
 
@@ -495,7 +503,9 @@ def generate_text_stream(prompt, model, tokenizer, max_length, temperature, top_
 
 # Main script
 def main():
-    model_path = "./samantha-17m-gpt2-rtx3050-step-304139" # or a local path
+    # Change this path to point to your trained model (17M or 350M)
+    model_path = "./samantha-17m-gpt2-rtx3050-step-304139"  # For 17M model
+    # model_path = "./samantha-350m-fineweb-step-XXXXXX"  # For 350M model
     
     # Load the tokenizer
     tokenizer = GPT2TokenizerFast.from_pretrained(model_path)
@@ -511,15 +521,19 @@ def main():
     # Move the model to the appropriate device
     device = torch.device("cpu") # interesting, cpu inference is faster than mps on m2 macbook air, change for "cuda", "rocm", etc
     model.to(device)
+
+    # Get model's max context length (works with both naming conventions)
+    max_context = getattr(config, 'max_position_embeddings', getattr(config, 'n_positions', 512))
+    print(f"Model loaded with max context length: {max_context}")
     
     # Get user input
     prompt = input(f"Enter a prompt: ")
     # Generate text
-    generate_text_stream( #generated_text = 
+    generate_text_stream( #generated_text =
         prompt,
         model,
         tokenizer,
-        max_length=512,
+        max_length=max_context,  # Use model's actual context length
         temperature=0.1, #0.1 is great for pre-trained only model
         repetition_penalty=2.0,
         no_repeat_ngram_size=2,
