@@ -32,8 +32,8 @@ Welcome to the Samantha repository! This project implements a custom GPT-3-like 
 
 1. Clone the repository:
     ```sh
-    git clone https://github.com/krll-corp/GPT3.git
-    cd GPT3
+    git clone https://github.com/guilh00009/Samantha-architecture.git
+    cd Samantha-architecture
     ```
 
 2. Install the required packages:
@@ -189,12 +189,15 @@ Training Samantha models requires significant computational resources. The model
 ## Samantha Architecture Components
 
 **The Samantha architecture is based on the GPT-3 paper with custom modifications for improved training stability and performance.**
+All custom components are based on the official GPT-2 implementation and have been modified according to the GPT-3 paper.
 
-- **SamanthaAttention**: Multi-head attention with biases and proper scaling.
-- **SamanthaMLP**: Feed-forward network with biases and GeLU activation.
-- **SamanthaBlock**: Transformer block with pre-layer normalization for better gradient flow.
-- **SamanthaModel**: Complete transformer model with embeddings and layer stacking.
-- **SamanthaLMHeadModel**: Language model head for next-token prediction.
+CustomGPT2Attention: GPT-3 attention mechanism with biases.
+
+CustomGPT2MLP: GPT-3 MLP with biases and standard GeLU.
+
+CustomGPT2Block: GPT-3 block with pre-layer normalization (can be switched back to GPT-2's post-layer normalization).
+
+CustomGPT2LMHeadModel: GPT-3 language model head with keyword arguments support.
 
 ## Contributing
 
