@@ -294,9 +294,28 @@ def train(rank, world_size, args):
 
     model = DDP(model)
 
-    # Set up the optimizer and learning rate scheduler
-    total_steps = 600000  # desired total training steps
-    warmup_steps = 60000  # Typically 10% of total_steps
+    # Set up the optimizer and learning rate scheduler for 3 epochs
+    # Estimate dataset size based on the streaming datasets (approximate)
+    # CC-MAIN-2024-10: ~15M samples, CC-MAIN-2024-18: ~15M samples, CC-MAIN-2023-50: ~10M samples
+    # Total approximate: ~40M samples, each batch has ~4 samples * block_size tokens
+    # Note: These are rough estimates. The actual dataset size may vary.
+    estimated_samples_per_epoch = 40000000  # Approximate total samples in dataset
+    samples_per_batch = 4  # batch_size
+    steps_per_epoch = estimated_samples_per_epoch // samples_per_batch // world_size  # Divide by world_size for distributed training
+
+    num_epochs = 3
+    total_steps = steps_per_epoch * num_epochs  # Total steps for 3 epochs
+    warmup_steps = int(0.1 * total_steps)  # 10% of total steps for warmup
+
+    if rank == 0:
+        print(f"Training configuration:")
+        print(f"- Number of epochs: {num_epochs}")
+        print(f"- Estimated steps per epoch: {steps_per_epoch}")
+        print(f"- Total training steps: {total_steps}")
+        print(f"- Warmup steps: {warmup_steps}")
+        print(f"- World size (processes): {world_size}")
+        print(f"- Batch size per process: {samples_per_batch}")
+        print("-" * 50)
 
     # optimizer hyperparameters
     optimizer = torch.optim.AdamW(
@@ -320,6 +339,8 @@ def train(rank, world_size, args):
 
     # training variables
     global_step = 0  # Moved initialization here for resume functionality
+    current_epoch = 0
+    steps_in_current_epoch = 0
 
     # Resume training if --resume flag is used
     if args.resume:
@@ -373,11 +394,23 @@ def train(rank, world_size, args):
             scheduler.step()
 
             global_step += 1
+            steps_in_current_epoch += 1
+
+            # Check if we've completed an epoch
+            if steps_in_current_epoch >= steps_per_epoch:
+                current_epoch += 1
+                steps_in_current_epoch = 0
+                if rank == 0:
+                    print(f"\n{'='*50}")
+                    print(f"Epoch {current_epoch}/{num_epochs} completed!")
+                    print(f"{'='*50}")
 
             # Live updating line (only on rank 0)
             if rank == 0:
                 avg_loss = accumulated_loss / gradient_accumulation_steps
-                print(f"\rStep [{global_step}/{total_steps}], Loss: {avg_loss:.4f}", end='', flush=True)
+                epoch_progress = steps_in_current_epoch / steps_per_epoch
+                print(f"\rEpoch {current_epoch + 1}/{num_epochs} [{steps_in_current_epoch}/{steps_per_epoch}] "
+                      f"Step [{global_step}/{total_steps}], Loss: {avg_loss:.4f}", end='', flush=True)
 
             # Emergency save (only on rank 0)
             if global_step % emergency_save_steps == 0 and rank == 0:
@@ -398,7 +431,7 @@ def train(rank, world_size, args):
                 perplexity = math.exp(avg_loss) if avg_loss < 7 else float('inf')
 
                 print()
-                print(f"Step {global_step}, Loss: {avg_loss:.4f}, Perplexity: {perplexity:.2f}, "
+                print(f"Epoch {current_epoch + 1}/{num_epochs}, Step {global_step}, Loss: {avg_loss:.4f}, Perplexity: {perplexity:.2f}, "
                       f"Grad Norm: {grad_norm:.4f}, Time per step: {elapsed_time / logging_steps:.4f} sec")
                 # Log to wandb
                 current_lr = scheduler.get_last_lr()[0]
@@ -408,6 +441,8 @@ def train(rank, world_size, args):
                     'train/grad_norm': grad_norm,
                     'train/lr': current_lr,
                     'train/step': global_step,
+                    'train/epoch': current_epoch + 1,
+                    'train/epoch_progress': steps_in_current_epoch / steps_per_epoch,
                 })
 
             # Validation every eval_steps (only on rank 0)
@@ -429,11 +464,12 @@ def train(rank, world_size, args):
                 avg_val_loss = val_loss / val_steps
                 val_perplexity = math.exp(avg_val_loss) if avg_val_loss < 7 else float('inf')
 
-                print(f"\nValidation at step {global_step}: Loss: {avg_val_loss:.4f}, Perplexity: {val_perplexity:.2f}")
+                print(f"\nValidation at Epoch {current_epoch + 1}/{num_epochs}, Step {global_step}: Loss: {avg_val_loss:.4f}, Perplexity: {val_perplexity:.2f}")
                 wandb.log({
                     'validation/loss': avg_val_loss,
                     'validation/perplexity': val_perplexity,
                     'validation/step': global_step,
+                    'validation/epoch': current_epoch + 1,
                 })
 
                 model.train()
@@ -445,7 +481,12 @@ def train(rank, world_size, args):
                 tokenizer.save_pretrained(save_path)
                 print(f"\nModel saved at step {global_step} to {save_path}")
 
-            if global_step >= total_steps:
+            # Check if we've completed all epochs
+            if current_epoch >= num_epochs:
+                if rank == 0:
+                    print(f"\n{'='*60}")
+                    print(f"Training completed! Finished {num_epochs} epochs ({global_step} total steps)")
+                    print(f"{'='*60}")
                 break
     except KeyboardInterrupt:
         if rank == 0:

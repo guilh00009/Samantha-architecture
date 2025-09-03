@@ -19,3 +19,8 @@ config: {'_wandb': {}}
 2025-09-02 17:14:56,795 INFO    MainThread:18684 [wandb_run.py:_redirect():2411] Wrapping output streams.
 2025-09-02 17:14:56,795 INFO    MainThread:18684 [wandb_run.py:_redirect():2434] Redirects installed.
 2025-09-02 17:14:56,796 INFO    MainThread:18684 [wandb_init.py:init():1057] run started, returning control to user process
+2025-09-03 07:41:02,762 INFO    MainThread:18684 [wandb_run.py:_finish():2260] finishing run grap-entertainment/samantha-17m/o600cyhh
+2025-09-03 07:41:02,776 INFO    MainThread:18684 [wandb_run.py:_atexit_cleanup():2459] got exitcode: 0
+2025-09-03 07:41:02,779 INFO    MainThread:18684 [wandb_run.py:_restore():2441] restore
+2025-09-03 07:41:02,782 INFO    MainThread:18684 [wandb_run.py:_restore():2447] restore done
+2025-09-03 07:41:04,377 INFO    MainThread:18684 [wandb_run.py:_footer_sync_info():3855] logging synced files
