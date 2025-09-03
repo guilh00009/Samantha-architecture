@@ -90,23 +90,17 @@ class CustomGPT2Block(GPT2Block):
             residual = hidden_states
             hidden_states = self.ln_1(hidden_states)
 
-            # Prepare attention arguments
-            attn_kwargs = {
-                'hidden_states': hidden_states,
-                'layer_past': layer_past,
-                'attention_mask': attention_mask,
-                'head_mask': head_mask,
-                'use_cache': use_cache,
-                'output_attentions': output_attentions,
-            }
-
-            # Only add encoder parameters if they are not None
-            if encoder_hidden_states is not None:
-                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
-            if encoder_attention_mask is not None:
-                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
-
-            attn_outputs = self.attn(**attn_kwargs)
+            # Call attention layer directly with explicit parameters
+            attn_outputs = self.attn(
+                hidden_states=hidden_states,
+                layer_past=layer_past,
+                attention_mask=attention_mask,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+            )
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 
@@ -120,23 +114,17 @@ class CustomGPT2Block(GPT2Block):
             # Original GPT-2 Post-LayerNorm
             residual = hidden_states
 
-            # Prepare attention arguments
-            attn_kwargs = {
-                'hidden_states': hidden_states,
-                'layer_past': layer_past,
-                'attention_mask': attention_mask,
-                'head_mask': head_mask,
-                'use_cache': use_cache,
-                'output_attentions': output_attentions,
-            }
-
-            # Only add encoder parameters if they are not None
-            if encoder_hidden_states is not None:
-                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
-            if encoder_attention_mask is not None:
-                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
-
-            attn_outputs = self.attn(**attn_kwargs)
+            # Call attention layer directly with explicit parameters
+            attn_outputs = self.attn(
+                hidden_states=hidden_states,
+                layer_past=layer_past,
+                attention_mask=attention_mask,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+            )
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 
