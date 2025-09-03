@@ -34,17 +34,7 @@ class CustomGPT2Attention(GPT2Attention):
         self.c_attn = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=True)
         self.c_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
 
-    def forward(
-        self,
-        hidden_states,
-        layer_past=None,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
+    def forward(self, hidden_states, layer_past=None, attention_mask=None, head_mask=None, encoder_hidden_states=None, encoder_attention_mask=None, use_cache=False, output_attentions=False, **kwargs):
         # Call parent forward method directly with all parameters
         # This avoids the parameter conflict by not using **kwargs
         return super().forward(
@@ -74,17 +64,7 @@ class CustomGPT2Block(GPT2Block):
         self.mlp = CustomGPT2MLP(4 * config.hidden_size, config)
         self.ln_2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
-    def forward(
-        self,
-        hidden_states,
-        layer_past=None,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
+    def forward(self, hidden_states, layer_past=None, attention_mask=None, head_mask=None, encoder_hidden_states=None, encoder_attention_mask=None, use_cache=False, output_attentions=False, **kwargs):
         if self.use_pre_layernorm:
             # Pre-LayerNorm
             residual = hidden_states
@@ -164,15 +144,11 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
         # Initialize weights
         self.post_init()
 
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        labels=None,
-    ):
+    def forward(self, input_ids=None, attention_mask=None, labels=None, **kwargs):
         transformer_outputs = self.transformer(
-            input_ids,
+            input_ids=input_ids,
             attention_mask=attention_mask,
+            **kwargs  # Pass through any additional arguments
         )
 
         hidden_states = transformer_outputs[0]
