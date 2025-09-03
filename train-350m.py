@@ -56,10 +56,15 @@ def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0, back
 
     raise last_exception
 
-# Define cleanup function for distributed training
+# Define setup and cleanup functions for distributed training
+def setup(rank, world_size):
+    #os.environ['MASTER_ADDR'] = 'localhost'
+    #os.environ['MASTER_PORT'] = '12355'  # Choose an open port
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    #torch.cuda.set_device(rank)
+
 def cleanup():
-    if torch.distributed.is_initialized():
-        torch.distributed.destroy_process_group()
+    dist.destroy_process_group()
 
 # H100 optimizations
 torch.set_default_dtype(torch.bfloat16)
@@ -68,6 +73,7 @@ torch.backends.cudnn.allow_tf32 = True  # Allow TF32 for cuDNN
 
 # Training function
 def train(rank, world_size, args):
+    setup(rank, world_size)
 
     # Initialize wandb only on rank 0 to prevent multiple initializations
     if rank == 0:
@@ -565,34 +571,23 @@ def train(rank, world_size, args):
 def main():
     parser = argparse.ArgumentParser(description='Training script for 350M Samantha model with resume functionality and DDP.')
     parser.add_argument('--resume', action='store_true', help='Resume training from the last checkpoint.')
-    parser.add_argument('--world_size', type=int, default=2, help='Number of processes for distributed training.')
     args = parser.parse_args()
 
-    # Use environment variables if available, otherwise use defaults
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ:
-        # Environment variables are set (likely by torchrun or similar)
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        local_rank = int(os.environ["LOCAL_RANK"])
-    else:
-        # Manual setup for single node
-        rank = 0
-        world_size = args.world_size
-        local_rank = 0
-
-    print(f"Starting training with rank {rank}, world_size {world_size}, local_rank {local_rank}")
-
-    # Use torchrun compatible distributed training
-    if world_size > 1:
-        # Initialize the process group
-        torch.distributed.init_process_group(
-            backend="gloo",  # Use gloo for CPU training
-            rank=rank,
-            world_size=world_size,
-            init_method="env://"  # Use environment variables
-        )
+    #world_size = torch.cuda.device_count()
+    world_size=2
+    if world_size < 1:
+        print("No GPUs available for training.")
+        sys.exit(1)
+    # Считываем rank, world_size из окружения:
+    local_rank = int(os.environ["LOCAL_RANK"])   # local rank on this node
+    rank = int(os.environ["RANK"])               # global rank (between all nodes)
+    world_size = int(os.environ["WORLD_SIZE"])   # num processes
 
     train(rank, world_size, args)
+    #mp.spawn(train,
+    #         args=(world_size, args),
+    #         nprocs=world_size,
+    #         join=True)
 
 if __name__ == "__main__":
     main()

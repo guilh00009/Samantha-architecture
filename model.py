@@ -45,17 +45,23 @@ class CustomGPT2Attention(GPT2Attention):
         use_cache=False,
         output_attentions=False,
     ):
-        # Call parent method directly with positional arguments to avoid conflicts
-        return super().forward(
-            hidden_states=hidden_states,
-            layer_past=layer_past,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-        )
+        # Prepare arguments for parent forward call
+        forward_kwargs = {
+            'hidden_states': hidden_states,
+            'layer_past': layer_past,
+            'attention_mask': attention_mask,
+            'head_mask': head_mask,
+            'use_cache': use_cache,
+            'output_attentions': output_attentions,
+        }
+
+        # Only add encoder parameters if they are not None
+        if encoder_hidden_states is not None:
+            forward_kwargs['encoder_hidden_states'] = encoder_hidden_states
+        if encoder_attention_mask is not None:
+            forward_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+        return super().forward(**forward_kwargs)
 
 class CustomGPT2MLP(GPT2MLP):
     def __init__(self, intermediate_size, config):
@@ -89,17 +95,23 @@ class CustomGPT2Block(GPT2Block):
             residual = hidden_states
             hidden_states = self.ln_1(hidden_states)
 
-            # Call attention with explicit keyword arguments
-            attn_outputs = self.attn(
-                hidden_states=hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
+            # Prepare attention arguments
+            attn_kwargs = {
+                'hidden_states': hidden_states,
+                'layer_past': layer_past,
+                'attention_mask': attention_mask,
+                'head_mask': head_mask,
+                'use_cache': use_cache,
+                'output_attentions': output_attentions,
+            }
+
+            # Only add encoder parameters if they are not None
+            if encoder_hidden_states is not None:
+                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
+            if encoder_attention_mask is not None:
+                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+            attn_outputs = self.attn(**attn_kwargs)
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 
@@ -113,17 +125,23 @@ class CustomGPT2Block(GPT2Block):
             # Original GPT-2 Post-LayerNorm
             residual = hidden_states
 
-            # Call attention with explicit keyword arguments
-            attn_outputs = self.attn(
-                hidden_states=hidden_states,
-                layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-            )
+            # Prepare attention arguments
+            attn_kwargs = {
+                'hidden_states': hidden_states,
+                'layer_past': layer_past,
+                'attention_mask': attention_mask,
+                'head_mask': head_mask,
+                'use_cache': use_cache,
+                'output_attentions': output_attentions,
+            }
+
+            # Only add encoder parameters if they are not None
+            if encoder_hidden_states is not None:
+                attn_kwargs['encoder_hidden_states'] = encoder_hidden_states
+            if encoder_attention_mask is not None:
+                attn_kwargs['encoder_attention_mask'] = encoder_attention_mask
+
+            attn_outputs = self.attn(**attn_kwargs)
             attn_output = attn_outputs[0]
             outputs = attn_outputs[1:]  # present, (attentions)
 
@@ -166,32 +184,12 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
     def forward(
         self,
         input_ids=None,
-        past_key_values=None,
         attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
         labels=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
     ):
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
         transformer_outputs = self.transformer(
             input_ids,
-            past_key_values=past_key_values,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
         )
 
         hidden_states = transformer_outputs[0]
@@ -200,18 +198,10 @@ class CustomGPT2LMHeadModel(GPT2LMHeadModel):
 
         loss = None
         if labels is not None:
-            # Shift so that tokens < n predict n
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1)
-            )
-
-        if not return_dict:
-            output = (lm_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
