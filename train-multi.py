@@ -419,7 +419,7 @@ from contextlib import contextmanager
 @contextmanager
 def autocast_if_bf16():
     if use_bf16 and torch.cuda.is_available():
-        ctx = torch.cuda.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+        ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16)
         with ctx:
             yield
     else:

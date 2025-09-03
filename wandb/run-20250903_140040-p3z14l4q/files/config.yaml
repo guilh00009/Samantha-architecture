@@ -1,0 +1,70 @@
+_wandb:
+    value:
+        cli_version: 0.21.3
+        e:
+            v2cnp163wdwoejne2o6dicnk1rvrjkh3:
+                args:
+                    - --model_size
+                    - 350m
+                    - --block_size
+                    - "256"
+                    - --micro_batch
+                    - "2"
+                    - --grad_accum
+                    - "8"
+                    - --total_steps
+                    - "600000"
+                    - --wandb
+                cpu_count: 10
+                cpu_count_logical: 16
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "487789162496"
+                        used: "481614499840"
+                email: kellerguilherme15@gmail.com
+                executable: C:\Users\kelle\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\python.exe
+                git:
+                    commit: e946989d3768f4a47cdda7884d8ea5fb22540e10
+                    remote: https://github.com/guilh00009/Samantha-architecture.git
+                gpu: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 2560
+                      memoryTotal: "6442450944"
+                      name: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+                      uuid: GPU-5235fe42-62c3-e661-2ac3-945cd121d637
+                host: Guilherme
+                memory:
+                    total: "16849256448"
+                os: Windows-10-10.0.26100-SP0
+                program: <python with no main file>
+                python: CPython 3.10.11
+                root: C:\Users\kelle\Documents\GitHub\Samantha-architecture
+                startedAt: "2025-09-03T17:00:40.517549Z"
+                writerId: v2cnp163wdwoejne2o6dicnk1rvrjkh3
+        m: []
+        python_version: 3.10.11
+        t:
+            "1":
+                - 1
+                - 11
+                - 49
+                - 51
+                - 71
+            "2":
+                - 1
+                - 11
+                - 49
+                - 51
+                - 71
+            "3":
+                - 13
+            "4": 3.10.11
+            "5": 0.21.3
+            "6": 4.39.3
+            "8":
+                - 3
+            "12": 0.21.3
+            "13": windows-amd64

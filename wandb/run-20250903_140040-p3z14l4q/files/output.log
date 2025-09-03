@@ -1,0 +1,13 @@
+2025-09-03 14:00:46,121 INFO WandB initialized
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\runpy.py", line 187, in _run_module_as_main
+    mod_name, mod_spec, code = _get_module_details(mod_name, _Error)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\runpy.py", line 110, in _get_module_details
+    __import__(pkg_name)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-multi.py", line 502, in <module>
+    with autocast_if_bf16():
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\lib\contextlib.py", line 135, in __enter__
+    return next(self.gen)
+  File "C:\Users\kelle\Documents\GitHub\Samantha-architecture\train-multi.py", line 422, in autocast_if_bf16
+    ctx = torch.cuda.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+TypeError: autocast.__init__() got an unexpected keyword argument 'device_type'
