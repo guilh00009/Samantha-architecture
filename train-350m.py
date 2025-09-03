@@ -6,6 +6,8 @@ import math
 import logging
 import torch
 import torch.nn as nn
+import shutil
+import glob
 from torch.utils.data import IterableDataset, DataLoader
 from transformers import (
     GPT2Config,
@@ -363,10 +365,48 @@ def train(rank, world_size, args):
             if rank == 0:
                 print("No checkpoint found in the emergency directory. Starting from scratch.")
 
+    def cleanup_old_checkpoints(max_checkpoints=50):
+        """Keep only the most recent max_checkpoints checkpoints."""
+        checkpoint_pattern = "./samantha-350m-fineweb-step-*"
+        checkpoint_dirs = glob.glob(checkpoint_pattern)
+
+        if len(checkpoint_dirs) <= max_checkpoints:
+            return
+
+        # Extract step numbers and sort by step number (newest first)
+        checkpoints_with_steps = []
+        for checkpoint_dir in checkpoint_dirs:
+            try:
+                # Extract step number from directory name like "samantha-350m-fineweb-step-5000000"
+                step_str = checkpoint_dir.split("-step-")[-1]
+                step_num = int(step_str)
+                checkpoints_with_steps.append((step_num, checkpoint_dir))
+            except (ValueError, IndexError):
+                # Skip directories that don't match the expected pattern
+                continue
+
+        # Sort by step number (descending - newest first)
+        checkpoints_with_steps.sort(key=lambda x: x[0], reverse=True)
+
+        # Keep only the most recent max_checkpoints
+        checkpoints_to_keep = checkpoints_with_steps[:max_checkpoints]
+        checkpoints_to_delete = checkpoints_with_steps[max_checkpoints:]
+
+        # Delete old checkpoints
+        for _, checkpoint_dir in checkpoints_to_delete:
+            try:
+                shutil.rmtree(checkpoint_dir)
+                print(f"Deleted old checkpoint: {checkpoint_dir}")
+            except Exception as e:
+                print(f"Failed to delete checkpoint {checkpoint_dir}: {e}")
+
+        if checkpoints_to_delete:
+            print(f"Kept {len(checkpoints_to_keep)} most recent checkpoints, deleted {len(checkpoints_to_delete)} old ones.")
+
     # Training loop
     model.train()
     logging_steps = 100
-    save_steps = 10000   # Save model every save_steps
+    save_steps = 5000000   # Save model every 5M steps
     eval_steps = 1000    # Evaluate model every eval_steps
     emergency_save_steps = 100  # Save temporary checkpoint every 100 steps
 
@@ -481,6 +521,9 @@ def train(rank, world_size, args):
                 tokenizer.save_pretrained(save_path)
                 print(f"\nModel saved at step {global_step} to {save_path}")
 
+                # Clean up old checkpoints, keeping only the 50 most recent
+                cleanup_old_checkpoints(max_checkpoints=50)
+
             # Check if we've completed all epochs
             if current_epoch >= num_epochs:
                 if rank == 0:
@@ -495,6 +538,9 @@ def train(rank, world_size, args):
             model.module.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
             print(f"Model saved at step {global_step} to {save_path}")
+
+            # Clean up old checkpoints, keeping only the 50 most recent
+            cleanup_old_checkpoints(max_checkpoints=50)
 
             checkpoint_dir = './emergency_checkpoint_samantha_350m'
             os.makedirs(checkpoint_dir, exist_ok=True)
